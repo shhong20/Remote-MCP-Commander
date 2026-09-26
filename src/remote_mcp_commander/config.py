@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 from functools import lru_cache
+from pathlib import Path
 from typing import Literal
 
 from pydantic import Field
@@ -11,10 +14,13 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="COMMANDER_", env_file=".env", extra="ignore")
 
-    agent_token: str = Field(min_length=16)
+    agent_token: str = ""
+    agent_token_file: str = "~/.remote-mcp-commander/agent-token"
     agent_tokens_json: str = "{}"
     agent_policies_json: str = "{}"
-    control_token: str = Field(min_length=16)
+    control_token: str = ""
+    registry_path: str = "~/.remote-mcp-commander/registry.json"
+    enrollment_ttl_s: int = Field(default=300, ge=30, le=3600)
     bind_host: str = "127.0.0.1"
     bind_port: int = 8765
     request_timeout_s: float = 15.0
@@ -60,21 +66,50 @@ class Settings(BaseSettings):
             policies[str(agent_id)] = {str(item) for item in executables}
         return policies
 
-    def token_for_agent(self, agent_id: str) -> str:
-        return self.agent_tokens.get(agent_id, self.agent_token)
+    @property
+    def registry_file(self) -> Path:
+        return Path(self.registry_path).expanduser()
+
+    @property
+    def agent_token_path(self) -> Path:
+        return Path(self.agent_token_file).expanduser()
+
+    def token_for_agent(self, agent_id: str) -> str | None:
+        token = self.agent_tokens.get(agent_id)
+        if token:
+            return token
+        return self.agent_token or None
+
+    def load_agent_token(self) -> str:
+        if self.agent_token:
+            return self.agent_token
+        path = self.agent_token_path
+        if not path.exists():
+            return ""
+        if os.name != "nt" and stat.S_IMODE(path.stat().st_mode) & 0o077:
+            raise ValueError("Agent token file must not be group/world accessible")
+        return path.read_text(encoding="utf-8").strip()
 
     @staticmethod
     def _credential_is_unsafe(value: str) -> bool:
         return len(value) < 16 or value.startswith("change-" + "me-")
 
     def validate_gateway_security(self) -> None:
-        credentials = [self.agent_token, self.control_token, *self.agent_tokens.values()]
-        if any(self._credential_is_unsafe(value) for value in credentials):
-            raise ValueError("replace all placeholder Gateway/Agent credentials before startup")
+        if self._credential_is_unsafe(self.control_token):
+            raise ValueError("replace the placeholder Gateway control credential before startup")
+        static_agent_credentials = [
+            value for value in [self.agent_token, *self.agent_tokens.values()] if value
+        ]
+        if any(self._credential_is_unsafe(value) for value in static_agent_credentials):
+            raise ValueError("replace all configured static Agent credentials before startup")
 
-    def validate_agent_security(self) -> None:
-        if self._credential_is_unsafe(self.agent_token):
-            raise ValueError("replace the placeholder Agent credential before startup")
+    def validate_agent_security(self, token: str) -> None:
+        if self._credential_is_unsafe(token):
+            raise ValueError("enroll the Agent or configure a non-placeholder credential")
+
+    def validate_mcp_gateway_security(self) -> None:
+        if self._credential_is_unsafe(self.control_token):
+            raise ValueError("configure a non-placeholder Gateway control credential for MCP")
 
     def validate_mcp_http_security(self) -> None:
         if self.mcp_transport != "streamable-http":
