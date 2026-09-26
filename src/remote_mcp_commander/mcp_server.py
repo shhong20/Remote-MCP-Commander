@@ -29,6 +29,7 @@ class StaticTokenVerifier(TokenVerifier):
 
 
 def build_mcp(settings: Settings) -> MCPServer:
+    settings.validate_mcp_gateway_security()
     kwargs: dict[str, object] = {
         "instructions": (
             "Operate only devices explicitly requested by the user. "

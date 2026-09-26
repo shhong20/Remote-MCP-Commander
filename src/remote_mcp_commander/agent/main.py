@@ -26,8 +26,9 @@ async def heartbeat_loop(websocket: websockets.ClientConnection, agent_id: str) 
 
 async def agent_loop() -> None:
     settings = get_settings()
-    settings.validate_agent_security()
-    headers = {"Authorization": f"Bearer {settings.agent_token}"}
+    token = settings.load_agent_token()
+    settings.validate_agent_security(token)
+    headers = {"Authorization": f"Bearer {token}"}
 
     while True:
         try:

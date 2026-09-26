@@ -5,6 +5,7 @@ import secrets
 import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from functools import lru_cache
 from pathlib import Path
 from time import perf_counter
 from typing import Annotated
@@ -14,16 +15,24 @@ from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocke
 
 from remote_mcp_commander.config import Settings, get_settings
 from remote_mcp_commander.gateway.audit import audit
+from remote_mcp_commander.gateway.registry import DeviceRegistry
 from remote_mcp_commander.protocol import (
     AgentHello,
     AgentInfo,
     AgentList,
     CommandRequest,
     CommandResult,
+    EnrollmentClaimBody,
+    EnrollmentClaimResult,
+    EnrollmentCreateBody,
+    EnrollmentTicket,
     ExecuteBody,
     PingRequest,
     PingResponse,
     PingResult,
+    RegisteredDevice,
+    RegisteredDeviceList,
+    RevokeResult,
 )
 
 AgentReply = CommandResult | PingResult
@@ -40,10 +49,15 @@ class AgentConnection:
     pending: dict[str, asyncio.Future[AgentReply]] = field(default_factory=dict)
 
 
-app = FastAPI(title="Remote MCP Commander Gateway", version="0.2.0")
+app = FastAPI(title="Remote MCP Commander Gateway", version="0.3.0")
 connections: dict[str, AgentConnection] = {}
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 AuthorizationHeader = Annotated[str | None, Header()]
+
+
+@lru_cache
+def registry_for(path: str) -> DeviceRegistry:
+    return DeviceRegistry(Path(path).expanduser())
 
 
 def require_control_token(
@@ -88,9 +102,103 @@ def pending_request(connection: AgentConnection, request_id: str) -> asyncio.Fut
     return future
 
 
+def bearer_value(authorization: str | None) -> str | None:
+    prefix = "Bearer "
+    if authorization is None or not authorization.startswith(prefix):
+        return None
+    value = authorization[len(prefix) :]
+    return value or None
+
+
+async def agent_auth_source(
+    agent_id: str,
+    authorization: str | None,
+    settings: Settings,
+) -> str | None:
+    token = bearer_value(authorization)
+    if token is None:
+        return None
+
+    registry = registry_for(str(settings.registry_file))
+    registered = await registry.get(agent_id)
+    if registered is not None:
+        if await registry.verify(agent_id, token):
+            return "registry"
+        return None
+
+    static_token = settings.token_for_agent(agent_id)
+    if static_token is not None and secrets.compare_digest(token, static_token):
+        return "static"
+    return None
+
+
 @app.get("/healthz")
 async def healthz() -> dict[str, str]:
     return {"status": "ok"}
+
+
+@app.post(
+    "/api/v1/enrollments",
+    dependencies=[Depends(require_control_token)],
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_enrollment(body: EnrollmentCreateBody, settings: SettingsDep) -> EnrollmentTicket:
+    registry = registry_for(str(settings.registry_file))
+    code, expires_at = await registry.create_enrollment(body.agent_id, settings.enrollment_ttl_s)
+    audit("enrollment_created", agent_id=body.agent_id, expires_at=expires_at.isoformat())
+    return EnrollmentTicket(agent_id=body.agent_id, code=code, expires_at=expires_at)
+
+
+@app.post("/api/v1/enrollments/claim")
+async def claim_enrollment(
+    body: EnrollmentClaimBody,
+    settings: SettingsDep,
+) -> EnrollmentClaimResult:
+    registry = registry_for(str(settings.registry_file))
+    try:
+        token = await registry.claim_enrollment(body.agent_id, body.code)
+    except ValueError as exc:
+        audit("enrollment_claim_failed", agent_id=body.agent_id)
+        raise HTTPException(status_code=401, detail="invalid or expired enrollment code") from exc
+
+    old = connections.get(body.agent_id)
+    if old is not None:
+        await old.websocket.close(code=4002, reason="device credential rotated")
+    audit("enrollment_claimed", agent_id=body.agent_id)
+    return EnrollmentClaimResult(agent_id=body.agent_id, agent_token=token)
+
+
+@app.get(
+    "/api/v1/registrations",
+    dependencies=[Depends(require_control_token)],
+)
+async def list_registrations(settings: SettingsDep) -> RegisteredDeviceList:
+    registry = registry_for(str(settings.registry_file))
+    records = await registry.list_devices()
+    devices = [
+        RegisteredDevice(
+            agent_id=record.agent_id,
+            created_at=record.created_at,
+            revoked_at=record.revoked_at,
+        )
+        for record in records
+    ]
+    return RegisteredDeviceList(devices=devices)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/revoke",
+    dependencies=[Depends(require_control_token)],
+)
+async def revoke_agent(agent_id: str, settings: SettingsDep) -> RevokeResult:
+    registry = registry_for(str(settings.registry_file))
+    if not await registry.revoke(agent_id):
+        raise HTTPException(status_code=404, detail="registered device not found")
+    connection = connections.get(agent_id)
+    if connection is not None:
+        await connection.websocket.close(code=4001, reason="device revoked")
+    audit("agent_revoked", agent_id=agent_id)
+    return RevokeResult(agent_id=agent_id, revoked=True)
 
 
 @app.get("/api/v1/agents", dependencies=[Depends(require_control_token)])
@@ -193,9 +301,12 @@ async def ping_agent(agent_id: str, settings: SettingsDep) -> PingResponse:
 @app.websocket("/ws/agent/{agent_id}")
 async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
     settings = get_settings()
-    token = websocket.headers.get("authorization")
-    expected = f"Bearer {settings.token_for_agent(agent_id)}"
-    if token is None or not secrets.compare_digest(token, expected):
+    auth_source = await agent_auth_source(
+        agent_id,
+        websocket.headers.get("authorization"),
+        settings,
+    )
+    if auth_source is None:
         audit("agent_auth_failed", agent_id=agent_id)
         await websocket.close(code=4401)
         return
@@ -207,7 +318,7 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
 
     connection = AgentConnection(websocket=websocket)
     connections[agent_id] = connection
-    audit("agent_connected", agent_id=agent_id)
+    audit("agent_connected", agent_id=agent_id, auth_source=auth_source)
 
     try:
         while True:

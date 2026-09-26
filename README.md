@@ -31,6 +31,7 @@ Agents initiate outbound connections, so controlled hosts do not need inbound SS
 - Streamable HTTP for deployed MCP access; stdio for local MCP clients
 - MCP bearer-token verification for Streamable HTTP
 - Persistent outbound Agent -> Gateway WebSocket
+- One-time device enrollment, hashed registry credentials, and revocation
 - Per-agent token support and Gateway-side host policies
 - Agent-side executable allowlist
 - `create_subprocess_exec(..., shell=False)` command execution
@@ -62,11 +63,36 @@ Start the Gateway:
 remote-mcp-gateway
 ```
 
-Start an Agent on a controlled machine:
+## Enroll a device
+
+Create a one-time pairing code from the authenticated control API:
 
 ```bash
+curl -X POST \
+  -H "Authorization: Bearer $COMMANDER_CONTROL_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"agent_id":"server-01"}' \
+  http://127.0.0.1:8765/api/v1/enrollments
+```
+
+Run enrollment on the controlled machine with the returned code:
+
+```bash
+remote-mcp-enroll --agent-id server-01 --gateway https://gateway.example.com --code '<pairing-code>'
 remote-mcp-agent
 ```
+
+Remote enrollment requires HTTPS; plain HTTP is accepted only for loopback development. Remote Agent WebSockets likewise require `wss://`, except on loopback. The issued Agent credential is stored locally with owner-only permissions, while the Gateway registry stores only its SHA-256 hash. Pairing codes are one-time and expire; the current MVP keeps pending pairing codes in memory, so a Gateway restart invalidates them.
+
+Revoke a registered device:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer $COMMANDER_CONTROL_TOKEN" \
+  http://127.0.0.1:8765/api/v1/agents/server-01/revoke
+```
+
+Revocation closes an active connection and prevents the old credential from reconnecting. Static Agent tokens remain available for migration, but once an Agent has a registry identity the registry is authoritative and static fallback is disabled.
 
 ## MCP server
 
@@ -111,12 +137,11 @@ curl -H "Authorization: Bearer $COMMANDER_CONTROL_TOKEN" \
 5. Prefer outbound Agent connections.
 6. Bound command runtime and output size.
 7. Run Agents as unprivileged OS users.
-8. Use TLS before exposing Streamable HTTP beyond localhost/private networks.
+8. Require TLS for every non-loopback Agent, Gateway-control, and Streamable HTTP connection.
 9. Treat allowlists as guardrails, not an OS sandbox.
 
 ## Planned next
 
-- device enrollment and revocation
 - bounded file read/write tools
 - process and service management
 - cancellable/persistent terminal sessions
