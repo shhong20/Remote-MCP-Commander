@@ -1,48 +1,134 @@
 # Remote MCP Commander
 
-Self-hosted remote command and file-management bridge designed for AI/MCP clients.
+Self-hosted remote command bridge for AI/MCP clients.
 
-> Status: early MVP. Do not expose the gateway or agent to the public Internet without TLS, authentication, and an explicit command policy.
+> Status: early MVP. Keep the Gateway and MCP endpoint on localhost/private networks until TLS, enrollment, and production authorization are configured.
 
-## Goal
-
-Remote MCP Commander separates control-plane access from the machines being controlled:
+## Architecture
 
 ```text
-AI / MCP Client
-      |
-      v
+MCP Client (ChatGPT / Claude / Inspector)
+        |
+        | MCP: stdio or Streamable HTTP
+        v
+Remote MCP Commander MCP Server
+        |
+        | authenticated control API
+        v
 Remote MCP Gateway
-      ^
-      | outbound persistent WebSocket
-      |
+        ^
+        | outbound persistent WebSocket
+        |
 Remote Agent(s)
 ```
 
-Agents initiate outbound connections to the gateway, so controlled hosts do not need inbound SSH or a publicly exposed agent port.
+Agents initiate outbound connections, so controlled hosts do not need inbound SSH or a public agent port.
 
-## MVP scope
+## Current MVP
 
-- Agent registration and heartbeat
-- Persistent outbound WebSocket connection
-- Request/response correlation
-- Command execution behind an explicit allow-list policy
-- Basic host/process information
-- Gateway health and connected-agent inventory
-- Audit-friendly request IDs
+- MCP Python SDK v2 tool server
+- `list_devices`, `device_info`, `ping_device`, `execute` MCP tools
+- Streamable HTTP for deployed MCP access; stdio for local MCP clients
+- MCP bearer-token verification for Streamable HTTP
+- Persistent outbound Agent -> Gateway WebSocket
+- Per-agent token support and Gateway-side host policies
+- Agent-side executable allowlist
+- `create_subprocess_exec(..., shell=False)` command execution
+- Request/response correlation with request IDs
+- Actual Gateway -> Agent RTT ping
+- Agent metadata, heartbeat, and `last_seen`
+- Command timeout and bounded stdout/stderr
+- Structured audit events
+- Ruff + pytest CI
 
-Planned next: bounded file operations, process/service controls, interactive sessions, stronger identity/authorization, TLS deployment, and an MCP-facing tool server.
+## Quick start
+
+Requires Python 3.11+.
+
+```bash
+git clone https://github.com/shhong20/Remote-MCP-Commander.git
+cd Remote-MCP-Commander
+python -m venv .venv
+source .venv/bin/activate
+pip install -e '.[dev]'
+cp .env.example .env
+```
+
+Replace every placeholder credential before use.
+
+Start the Gateway:
+
+```bash
+remote-mcp-gateway
+```
+
+Start an Agent on a controlled machine:
+
+```bash
+remote-mcp-agent
+```
+
+## MCP server
+
+For a local MCP host, use stdio:
+
+```bash
+COMMANDER_MCP_TRANSPORT=stdio remote-mcp-server
+```
+
+For a deployed MCP endpoint, use Streamable HTTP and configure a long random MCP token:
+
+```bash
+COMMANDER_MCP_TRANSPORT=streamable-http remote-mcp-server
+```
+
+The endpoint defaults to `http://127.0.0.1:8766/mcp`. Streamable HTTP refuses to start without a sufficiently long `COMMANDER_MCP_TOKEN`.
+
+The current MCP tools are intentionally narrow:
+
+- `list_devices()` - connected devices and metadata
+- `device_info(agent_id)` - one device
+- `ping_device(agent_id)` - real Gateway/Agent round-trip latency
+- `execute(agent_id, argv)` - structured argv execution
+
+`execute` never accepts a shell command string. Gateway policy and Agent policy must both allow the executable.
+
+## Control API
+
+List connected devices:
+
+```bash
+curl -H "Authorization: Bearer $COMMANDER_CONTROL_TOKEN" \
+  http://127.0.0.1:8765/api/v1/agents
+```
 
 ## Security principles
 
 1. Deny by default.
-2. Never accept arbitrary shell execution unless the operator explicitly enables it.
-3. Keep credentials out of the repository.
-4. Prefer outbound agent connections.
-5. Record who requested what, against which host, and the result.
+2. Keep execution policy outside the model.
+3. Require both Gateway and Agent policy checks.
+4. Keep credentials out of the repository.
+5. Prefer outbound Agent connections.
 6. Bound command runtime and output size.
-7. Run the agent as an unprivileged OS user.
+7. Run Agents as unprivileged OS users.
+8. Use TLS before exposing Streamable HTTP beyond localhost/private networks.
+9. Treat allowlists as guardrails, not an OS sandbox.
+
+## Planned next
+
+- device enrollment and revocation
+- bounded file read/write tools
+- process and service management
+- cancellable/persistent terminal sessions
+- persistent audit storage
+- TLS/reverse-proxy deployment templates
+- multi-user RBAC and stronger OAuth/OIDC integration
 
 ## Development
 
-The initial implementation is Python 3.11+ using FastAPI, WebSockets, and Pydantic.
+```bash
+ruff check .
+pytest -q
+```
+
+The implementation uses FastAPI, WebSockets, MCP Python SDK v2, Pydantic, HTTPX, and asyncio.
