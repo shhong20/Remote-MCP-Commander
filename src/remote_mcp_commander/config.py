@@ -6,6 +6,7 @@ import stat
 from functools import lru_cache
 from pathlib import Path
 from typing import Literal
+from urllib.parse import urlparse
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -94,6 +95,16 @@ class Settings(BaseSettings):
     def _credential_is_unsafe(value: str) -> bool:
         return len(value) < 16 or value.startswith("change-" + "me-")
 
+    @staticmethod
+    def _require_secure_remote_url(value: str, secure_scheme: str, loopback_scheme: str) -> None:
+        parsed = urlparse(value)
+        loopback_hosts = {"127.0.0.1", "localhost", "::1"}
+        if parsed.scheme == secure_scheme:
+            return
+        if parsed.scheme == loopback_scheme and parsed.hostname in loopback_hosts:
+            return
+        raise ValueError(f"remote URL must use {secure_scheme}://: {value}")
+
     def validate_gateway_security(self) -> None:
         if self._credential_is_unsafe(self.control_token):
             raise ValueError("replace the placeholder Gateway control credential before startup")
@@ -106,16 +117,21 @@ class Settings(BaseSettings):
     def validate_agent_security(self, token: str) -> None:
         if self._credential_is_unsafe(token):
             raise ValueError("enroll the Agent or configure a non-placeholder credential")
+        self._require_secure_remote_url(self.gateway_ws, "wss", "ws")
 
     def validate_mcp_gateway_security(self) -> None:
         if self._credential_is_unsafe(self.control_token):
             raise ValueError("configure a non-placeholder Gateway control credential for MCP")
+        self._require_secure_remote_url(self.gateway_http, "https", "http")
 
     def validate_mcp_http_security(self) -> None:
         if self.mcp_transport != "streamable-http":
             return
         if self._credential_is_unsafe(self.mcp_token):
             raise ValueError("set a non-placeholder COMMANDER_MCP_TOKEN for Streamable HTTP")
+        if self.mcp_host not in {"127.0.0.1", "localhost", "::1"}:
+            self._require_secure_remote_url(self.mcp_resource_url, "https", "http")
+            self._require_secure_remote_url(self.mcp_issuer_url, "https", "http")
 
 
 @lru_cache

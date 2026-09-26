@@ -82,7 +82,7 @@ remote-mcp-enroll --agent-id server-01 --gateway https://gateway.example.com --c
 remote-mcp-agent
 ```
 
-Remote enrollment requires HTTPS; plain HTTP is accepted only for loopback development. The issued Agent credential is stored locally with owner-only permissions, while the Gateway registry stores only its SHA-256 hash. Pairing codes are one-time and expire; the current MVP keeps pending pairing codes in memory, so a Gateway restart invalidates them.
+Remote enrollment requires HTTPS; plain HTTP is accepted only for loopback development. Remote Agent WebSockets likewise require `wss://`, except on loopback. The issued Agent credential is stored locally with owner-only permissions, while the Gateway registry stores only its SHA-256 hash. Pairing codes are one-time and expire; the current MVP keeps pending pairing codes in memory, so a Gateway restart invalidates them.
 
 Revoke a registered device:
 
@@ -137,7 +137,7 @@ curl -H "Authorization: Bearer $COMMANDER_CONTROL_TOKEN" \
 5. Prefer outbound Agent connections.
 6. Bound command runtime and output size.
 7. Run Agents as unprivileged OS users.
-8. Use TLS before exposing Streamable HTTP beyond localhost/private networks.
+8. Require TLS for every non-loopback Agent, Gateway-control, and Streamable HTTP connection.
 9. Treat allowlists as guardrails, not an OS sandbox.
 
 ## Planned next
