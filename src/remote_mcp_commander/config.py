@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -23,6 +24,18 @@ class Settings(BaseSettings):
     allowed_executables: str = "echo,hostname,whoami,uptime"
     max_output_bytes: int = 65_536
     exec_timeout_s: float = 10.0
+
+    gateway_http: str = "http://127.0.0.1:8765"
+    mcp_transport: Literal["stdio", "streamable-http"] = "stdio"
+    mcp_host: str = "127.0.0.1"
+    mcp_port: int = 8766
+    mcp_path: str = "/mcp"
+    mcp_token: str = ""
+    mcp_issuer_url: str = "http://127.0.0.1:8766"
+    mcp_resource_url: str = "http://127.0.0.1:8766/mcp"
+    mcp_client_id: str = "remote-mcp-client"
+    mcp_scope: str = "commander:use"
+    mcp_gateway_timeout_s: float = 20.0
 
     @property
     def executable_allowlist(self) -> set[str]:
@@ -49,6 +62,12 @@ class Settings(BaseSettings):
 
     def token_for_agent(self, agent_id: str) -> str:
         return self.agent_tokens.get(agent_id, self.agent_token)
+
+    def validate_mcp_http_security(self) -> None:
+        if self.mcp_transport == "streamable-http" and len(self.mcp_token) < 16:
+            raise ValueError(
+                "COMMANDER_MCP_TOKEN must be at least 16 characters for Streamable HTTP"
+            )
 
 
 @lru_cache

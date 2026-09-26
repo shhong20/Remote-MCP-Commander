@@ -6,6 +6,7 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from time import perf_counter
 from typing import Annotated
 
 import uvicorn
@@ -13,7 +14,19 @@ from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocke
 
 from remote_mcp_commander.config import Settings, get_settings
 from remote_mcp_commander.gateway.audit import audit
-from remote_mcp_commander.protocol import AgentHello, CommandRequest, CommandResult, ExecuteBody
+from remote_mcp_commander.protocol import (
+    AgentHello,
+    AgentInfo,
+    AgentList,
+    CommandRequest,
+    CommandResult,
+    ExecuteBody,
+    PingRequest,
+    PingResponse,
+    PingResult,
+)
+
+AgentReply = CommandResult | PingResult
 
 
 @dataclass
@@ -24,10 +37,10 @@ class AgentConnection:
     hostname: str | None = None
     platform: str | None = None
     version: str | None = None
-    pending: dict[str, asyncio.Future[CommandResult]] = field(default_factory=dict)
+    pending: dict[str, asyncio.Future[AgentReply]] = field(default_factory=dict)
 
 
-app = FastAPI(title="Remote MCP Commander Gateway", version="0.1.0")
+app = FastAPI(title="Remote MCP Commander Gateway", version="0.2.0")
 connections: dict[str, AgentConnection] = {}
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 AuthorizationHeader = Annotated[str | None, Header()]
@@ -58,26 +71,46 @@ def enforce_agent_policy(agent_id: str, argv: list[str], settings: Settings) -> 
         )
 
 
+def agent_info(agent_id: str, connection: AgentConnection) -> AgentInfo:
+    return AgentInfo(
+        agent_id=agent_id,
+        hostname=connection.hostname,
+        platform=connection.platform,
+        version=connection.version,
+        connected_at=connection.connected_at,
+        last_seen=connection.last_seen,
+    )
+
+
+def pending_request(connection: AgentConnection, request_id: str) -> asyncio.Future[AgentReply]:
+    future: asyncio.Future[AgentReply] = asyncio.get_running_loop().create_future()
+    connection.pending[request_id] = future
+    return future
+
+
 @app.get("/healthz")
 async def healthz() -> dict[str, str]:
     return {"status": "ok"}
 
 
 @app.get("/api/v1/agents", dependencies=[Depends(require_control_token)])
-async def list_agents() -> dict[str, list[dict[str, str | None]]]:
-    agents: list[dict[str, str | None]] = []
-    for agent_id, connection in sorted(connections.items()):
-        agents.append(
-            {
-                "agent_id": agent_id,
-                "hostname": connection.hostname,
-                "platform": connection.platform,
-                "version": connection.version,
-                "connected_at": connection.connected_at.isoformat(),
-                "last_seen": connection.last_seen.isoformat(),
-            }
-        )
-    return {"agents": agents}
+async def list_agents() -> AgentList:
+    agents = [
+        agent_info(agent_id, connection)
+        for agent_id, connection in sorted(connections.items())
+    ]
+    return AgentList(agents=agents)
+
+
+@app.get(
+    "/api/v1/agents/{agent_id}",
+    dependencies=[Depends(require_control_token)],
+)
+async def get_agent(agent_id: str) -> AgentInfo:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    return agent_info(agent_id, connection)
 
 
 @app.post(
@@ -91,27 +124,62 @@ async def execute(agent_id: str, body: ExecuteBody, settings: SettingsDep) -> Co
 
     enforce_agent_policy(agent_id, body.argv, settings)
     request_id = uuid.uuid4().hex
-    loop = asyncio.get_running_loop()
-    future: asyncio.Future[CommandResult] = loop.create_future()
-    connection.pending[request_id] = future
+    future = pending_request(connection, request_id)
     audit("command_requested", agent_id=agent_id, request_id=request_id, argv=body.argv)
 
     try:
         request = CommandRequest(request_id=request_id, argv=body.argv)
         await connection.websocket.send_text(request.model_dump_json())
-        result = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, CommandResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
         audit(
             "command_completed",
             agent_id=agent_id,
             request_id=request_id,
-            returncode=result.returncode,
-            rejected=result.rejected,
-            timed_out=result.timed_out,
+            returncode=reply.returncode,
+            rejected=reply.rejected,
+            timed_out=reply.timed_out,
         )
-        return result
+        return reply
     except TimeoutError as exc:
         audit("command_timeout", agent_id=agent_id, request_id=request_id)
         raise HTTPException(status_code=504, detail="agent request timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/ping",
+    dependencies=[Depends(require_control_token)],
+)
+async def ping_agent(agent_id: str, settings: SettingsDep) -> PingResponse:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    started = perf_counter()
+    try:
+        request = PingRequest(request_id=request_id)
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, PingResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        round_trip_ms = round((perf_counter() - started) * 1000, 3)
+        audit("agent_ping", agent_id=agent_id, round_trip_ms=round_trip_ms)
+        return PingResponse(
+            agent_id=agent_id,
+            round_trip_ms=round_trip_ms,
+            last_seen=connection.last_seen,
+        )
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent ping timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
     finally:
         connection.pending.pop(request_id, None)
 
@@ -155,13 +223,16 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
             if message_type == "heartbeat":
                 continue
 
-            if message_type != "command_result":
+            if message_type == "command_result":
+                reply: AgentReply = CommandResult.model_validate(payload)
+            elif message_type == "ping_result":
+                reply = PingResult.model_validate(payload)
+            else:
                 continue
 
-            result = CommandResult.model_validate(payload)
-            future = connection.pending.get(result.request_id)
+            future = connection.pending.get(reply.request_id)
             if future is not None and not future.done():
-                future.set_result(result)
+                future.set_result(reply)
     except WebSocketDisconnect:
         pass
     finally:
