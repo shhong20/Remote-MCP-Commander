@@ -4,6 +4,7 @@ import asyncio
 import secrets
 import uuid
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Annotated
 
@@ -11,12 +12,18 @@ import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect, status
 
 from remote_mcp_commander.config import Settings, get_settings
-from remote_mcp_commander.protocol import CommandRequest, CommandResult, ExecuteBody
+from remote_mcp_commander.gateway.audit import audit
+from remote_mcp_commander.protocol import AgentHello, CommandRequest, CommandResult, ExecuteBody
 
 
 @dataclass
 class AgentConnection:
     websocket: WebSocket
+    connected_at: datetime = field(default_factory=lambda: datetime.now(UTC))
+    last_seen: datetime = field(default_factory=lambda: datetime.now(UTC))
+    hostname: str | None = None
+    platform: str | None = None
+    version: str | None = None
     pending: dict[str, asyncio.Future[CommandResult]] = field(default_factory=dict)
 
 
@@ -44,6 +51,7 @@ def enforce_agent_policy(agent_id: str, argv: list[str], settings: Settings) -> 
         return
     executable = Path(argv[0]).name
     if executable not in policy:
+        audit("command_denied", agent_id=agent_id, executable=executable)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"gateway policy denied executable: {executable}",
@@ -56,8 +64,20 @@ async def healthz() -> dict[str, str]:
 
 
 @app.get("/api/v1/agents", dependencies=[Depends(require_control_token)])
-async def list_agents() -> dict[str, list[str]]:
-    return {"agents": sorted(connections)}
+async def list_agents() -> dict[str, list[dict[str, str | None]]]:
+    agents: list[dict[str, str | None]] = []
+    for agent_id, connection in sorted(connections.items()):
+        agents.append(
+            {
+                "agent_id": agent_id,
+                "hostname": connection.hostname,
+                "platform": connection.platform,
+                "version": connection.version,
+                "connected_at": connection.connected_at.isoformat(),
+                "last_seen": connection.last_seen.isoformat(),
+            }
+        )
+    return {"agents": agents}
 
 
 @app.post(
@@ -74,12 +94,23 @@ async def execute(agent_id: str, body: ExecuteBody, settings: SettingsDep) -> Co
     loop = asyncio.get_running_loop()
     future: asyncio.Future[CommandResult] = loop.create_future()
     connection.pending[request_id] = future
+    audit("command_requested", agent_id=agent_id, request_id=request_id, argv=body.argv)
 
     try:
         request = CommandRequest(request_id=request_id, argv=body.argv)
         await connection.websocket.send_text(request.model_dump_json())
-        return await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        result = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        audit(
+            "command_completed",
+            agent_id=agent_id,
+            request_id=request_id,
+            returncode=result.returncode,
+            rejected=result.rejected,
+            timed_out=result.timed_out,
+        )
+        return result
     except TimeoutError as exc:
+        audit("command_timeout", agent_id=agent_id, request_id=request_id)
         raise HTTPException(status_code=504, detail="agent request timed out") from exc
     finally:
         connection.pending.pop(request_id, None)
@@ -91,6 +122,7 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
     token = websocket.headers.get("authorization")
     expected = f"Bearer {settings.token_for_agent(agent_id)}"
     if token is None or not secrets.compare_digest(token, expected):
+        audit("agent_auth_failed", agent_id=agent_id)
         await websocket.close(code=4401)
         return
 
@@ -101,12 +133,31 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
 
     connection = AgentConnection(websocket=websocket)
     connections[agent_id] = connection
+    audit("agent_connected", agent_id=agent_id)
 
     try:
         while True:
             payload = await websocket.receive_json()
-            if payload.get("type") != "command_result":
+            connection.last_seen = datetime.now(UTC)
+            message_type = payload.get("type")
+
+            if message_type == "hello":
+                hello = AgentHello.model_validate(payload)
+                if hello.agent_id != agent_id:
+                    await websocket.close(code=4403, reason="agent identity mismatch")
+                    return
+                connection.hostname = hello.hostname
+                connection.platform = hello.platform
+                connection.version = hello.version
+                audit("agent_hello", agent_id=agent_id, hostname=hello.hostname)
                 continue
+
+            if message_type == "heartbeat":
+                continue
+
+            if message_type != "command_result":
+                continue
+
             result = CommandResult.model_validate(payload)
             future = connection.pending.get(result.request_id)
             if future is not None and not future.done():
@@ -119,6 +170,7 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
         for future in connection.pending.values():
             if not future.done():
                 future.set_exception(ConnectionError("agent disconnected"))
+        audit("agent_disconnected", agent_id=agent_id)
 
 
 def run() -> None:
