@@ -21,17 +21,64 @@ Remote Agent(s)
 
 Agents initiate outbound connections to the gateway, so controlled hosts do not need inbound SSH or a publicly exposed agent port.
 
-## MVP scope
+## Current MVP
 
-- Agent registration and heartbeat
-- Persistent outbound WebSocket connection
-- Request/response correlation
-- Command execution behind an explicit allow-list policy
-- Basic host/process information
-- Gateway health and connected-agent inventory
-- Audit-friendly request IDs
+- Persistent outbound Agent -> Gateway WebSocket
+- Bearer-token authentication for agent and control APIs
+- Connected-agent inventory
+- Request/response correlation using request IDs
+- Command execution using `create_subprocess_exec(..., shell=False)`
+- Deny-by-default executable allowlist
+- Per-command timeout
+- Bounded stdout/stderr capture
+- Reconnect loop for disconnected agents
+- Basic CI with Ruff + pytest
 
-Planned next: bounded file operations, process/service controls, interactive sessions, stronger identity/authorization, TLS deployment, and an MCP-facing tool server.
+## Quick start
+
+Requires Python 3.11+.
+
+```bash
+git clone https://github.com/shhong20/Remote-MCP-Commander.git
+cd Remote-MCP-Commander
+python -m venv .venv
+source .venv/bin/activate
+pip install -e '.[dev]'
+cp .env.example .env
+```
+
+Replace both tokens in `.env` with long random values before running anything outside localhost.
+
+Start the gateway:
+
+```bash
+remote-mcp-gateway
+```
+
+Start an agent in another terminal:
+
+```bash
+remote-mcp-agent
+```
+
+List connected agents:
+
+```bash
+curl -H "Authorization: Bearer $COMMANDER_CONTROL_TOKEN" \
+  http://127.0.0.1:8765/api/v1/agents
+```
+
+Execute an allowlisted command:
+
+```bash
+curl -X POST \
+  -H "Authorization: Bearer $COMMANDER_CONTROL_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"argv":["hostname"]}' \
+  http://127.0.0.1:8765/api/v1/agents/server-01/execute
+```
+
+The API accepts an argv array, not a shell command string. Shell operators such as `&&`, pipes, redirects, and command substitution are therefore not interpreted by a shell.
 
 ## Security principles
 
@@ -42,7 +89,27 @@ Planned next: bounded file operations, process/service controls, interactive ses
 5. Record who requested what, against which host, and the result.
 6. Bound command runtime and output size.
 7. Run the agent as an unprivileged OS user.
+8. Use TLS before exposing the gateway outside localhost/private networks.
+
+## Not implemented yet
+
+The current branch is intentionally narrow. The following are planned but should not be considered available or secure yet:
+
+- MCP tool endpoint for ChatGPT/other MCP clients
+- per-agent credentials and scoped authorization
+- bounded file read/write operations
+- process/service management
+- interactive terminal sessions
+- structured audit persistence
+- TLS/reverse-proxy deployment templates
+- enrollment/revocation flow
+- multi-user RBAC
 
 ## Development
 
-The initial implementation is Python 3.11+ using FastAPI, WebSockets, and Pydantic.
+```bash
+ruff check .
+pytest -q
+```
+
+The initial implementation uses FastAPI, WebSockets, Pydantic, and asyncio.
