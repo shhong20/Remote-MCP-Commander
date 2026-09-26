@@ -4,6 +4,7 @@ import asyncio
 import secrets
 import uuid
 from dataclasses import dataclass, field
+from typing import Annotated
 
 import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect, status
@@ -20,15 +21,20 @@ class AgentConnection:
 
 app = FastAPI(title="Remote MCP Commander Gateway", version="0.1.0")
 connections: dict[str, AgentConnection] = {}
+SettingsDep = Annotated[Settings, Depends(get_settings)]
+AuthorizationHeader = Annotated[str | None, Header()]
 
 
 def require_control_token(
-    authorization: str | None = Header(default=None),
-    settings: Settings = Depends(get_settings),
+    settings: SettingsDep,
+    authorization: AuthorizationHeader = None,
 ) -> None:
     expected = f"Bearer {settings.control_token}"
     if authorization is None or not secrets.compare_digest(authorization, expected):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid control token")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="invalid control token",
+        )
 
 
 @app.get("/healthz")
@@ -41,8 +47,11 @@ async def list_agents() -> dict[str, list[str]]:
     return {"agents": sorted(connections)}
 
 
-@app.post("/api/v1/agents/{agent_id}/execute", dependencies=[Depends(require_control_token)])
-async def execute(agent_id: str, body: ExecuteBody, settings: Settings = Depends(get_settings)) -> CommandResult:
+@app.post(
+    "/api/v1/agents/{agent_id}/execute",
+    dependencies=[Depends(require_control_token)],
+)
+async def execute(agent_id: str, body: ExecuteBody, settings: SettingsDep) -> CommandResult:
     connection = connections.get(agent_id)
     if connection is None:
         raise HTTPException(status_code=404, detail="agent not connected")
