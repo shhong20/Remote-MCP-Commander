@@ -5,7 +5,6 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-
 audit_logger = logging.getLogger("remote_mcp_commander.audit")
 
 
