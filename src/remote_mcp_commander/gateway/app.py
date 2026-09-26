@@ -125,7 +125,13 @@ async def execute(agent_id: str, body: ExecuteBody, settings: SettingsDep) -> Co
     enforce_agent_policy(agent_id, body.argv, settings)
     request_id = uuid.uuid4().hex
     future = pending_request(connection, request_id)
-    audit("command_requested", agent_id=agent_id, request_id=request_id, argv=body.argv)
+    audit(
+        "command_requested",
+        agent_id=agent_id,
+        request_id=request_id,
+        executable=Path(body.argv[0]).name,
+        argc=len(body.argv),
+    )
 
     try:
         request = CommandRequest(request_id=request_id, argv=body.argv)
@@ -246,4 +252,5 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
 
 def run() -> None:
     settings = get_settings()
+    settings.validate_gateway_security()
     uvicorn.run(app, host=settings.bind_host, port=settings.bind_port)

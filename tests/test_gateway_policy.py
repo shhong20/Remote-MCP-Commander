@@ -35,3 +35,15 @@ def test_gateway_policy_denies_unlisted_executable() -> None:
 def test_missing_gateway_policy_remains_agent_side_only() -> None:
     settings = make_settings(agent_policies_json="{}")
     enforce_agent_policy("server-99", ["whoami"], settings)
+
+
+def test_gateway_startup_rejects_example_credentials() -> None:
+    settings = make_settings(agent_token="change-me-agent-token")
+    with pytest.raises(ValueError, match="placeholder"):
+        settings.validate_gateway_security()
+
+
+def test_agent_startup_rejects_example_credential() -> None:
+    settings = make_settings(agent_token="change-me-agent-token")
+    with pytest.raises(ValueError, match="placeholder"):
+        settings.validate_agent_security()

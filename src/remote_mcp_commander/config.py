@@ -63,11 +63,24 @@ class Settings(BaseSettings):
     def token_for_agent(self, agent_id: str) -> str:
         return self.agent_tokens.get(agent_id, self.agent_token)
 
+    @staticmethod
+    def _credential_is_unsafe(value: str) -> bool:
+        return len(value) < 16 or value.startswith("change-" + "me-")
+
+    def validate_gateway_security(self) -> None:
+        credentials = [self.agent_token, self.control_token, *self.agent_tokens.values()]
+        if any(self._credential_is_unsafe(value) for value in credentials):
+            raise ValueError("replace all placeholder Gateway/Agent credentials before startup")
+
+    def validate_agent_security(self) -> None:
+        if self._credential_is_unsafe(self.agent_token):
+            raise ValueError("replace the placeholder Agent credential before startup")
+
     def validate_mcp_http_security(self) -> None:
-        if self.mcp_transport == "streamable-http" and len(self.mcp_token) < 16:
-            raise ValueError(
-                "COMMANDER_MCP_TOKEN must be at least 16 characters for Streamable HTTP"
-            )
+        if self.mcp_transport != "streamable-http":
+            return
+        if self._credential_is_unsafe(self.mcp_token):
+            raise ValueError("set a non-placeholder COMMANDER_MCP_TOKEN for Streamable HTTP")
 
 
 @lru_cache
