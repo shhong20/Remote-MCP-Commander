@@ -39,11 +39,11 @@ def test_missing_gateway_policy_remains_agent_side_only() -> None:
 
 def test_gateway_startup_rejects_example_credentials() -> None:
     settings = make_settings(agent_token="change-me-agent-token")
-    with pytest.raises(ValueError, match="placeholder"):
+    with pytest.raises(ValueError, match="static Agent credentials"):
         settings.validate_gateway_security()
 
 
 def test_agent_startup_rejects_example_credential() -> None:
     settings = make_settings(agent_token="change-me-agent-token")
-    with pytest.raises(ValueError, match="placeholder"):
-        settings.validate_agent_security()
+    with pytest.raises(ValueError, match="enroll the Agent"):
+        settings.validate_agent_security(settings.agent_token)
