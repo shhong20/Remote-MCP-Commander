@@ -4,6 +4,7 @@ import asyncio
 import secrets
 import uuid
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Annotated
 
 import uvicorn
@@ -37,6 +38,18 @@ def require_control_token(
         )
 
 
+def enforce_agent_policy(agent_id: str, argv: list[str], settings: Settings) -> None:
+    policy = settings.agent_policies.get(agent_id)
+    if policy is None:
+        return
+    executable = Path(argv[0]).name
+    if executable not in policy:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"gateway policy denied executable: {executable}",
+        )
+
+
 @app.get("/healthz")
 async def healthz() -> dict[str, str]:
     return {"status": "ok"}
@@ -56,6 +69,7 @@ async def execute(agent_id: str, body: ExecuteBody, settings: SettingsDep) -> Co
     if connection is None:
         raise HTTPException(status_code=404, detail="agent not connected")
 
+    enforce_agent_policy(agent_id, body.argv, settings)
     request_id = uuid.uuid4().hex
     loop = asyncio.get_running_loop()
     future: asyncio.Future[CommandResult] = loop.create_future()
@@ -75,7 +89,7 @@ async def execute(agent_id: str, body: ExecuteBody, settings: SettingsDep) -> Co
 async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
     settings = get_settings()
     token = websocket.headers.get("authorization")
-    expected = f"Bearer {settings.agent_token}"
+    expected = f"Bearer {settings.token_for_agent(agent_id)}"
     if token is None or not secrets.compare_digest(token, expected):
         await websocket.close(code=4401)
         return
