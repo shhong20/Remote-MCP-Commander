@@ -26,6 +26,8 @@ class AgentHello(BaseModel):
     type: Literal["hello"] = "hello"
     agent_id: str
     hostname: str
+    platform: str
+    version: str = "0.1.0"
 
 
 class Heartbeat(BaseModel):
