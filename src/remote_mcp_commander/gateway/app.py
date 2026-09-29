@@ -55,14 +55,22 @@ from remote_mcp_commander.protocol import (
     CommandSessionStartBody,
     CommandSessionStartRequest,
     CommandSessionStatusRequest,
+    DirectoryListBody,
+    DirectoryListRequest,
+    DirectoryListResult,
     EnrollmentClaimBody,
     EnrollmentClaimResult,
     EnrollmentCreateBody,
     EnrollmentTicket,
     ExecuteBody,
+    FileInfoBody,
+    FileInfoRequest,
+    FileInfoResult,
     FileReadBody,
     FileReadRequest,
     FileReadResult,
+    FileRootListRequest,
+    FileRootListResult,
     FileWriteBody,
     FileWriteRequest,
     FileWriteResult,
@@ -101,6 +109,9 @@ AgentReply = (
     CommandResult
     | PingResult
     | FileReadResult
+    | FileRootListResult
+    | DirectoryListResult
+    | FileInfoResult
     | FileWriteResult
     | ProcessListResult
     | ServiceStatusResult
@@ -796,6 +807,93 @@ async def get_agent_git_status(
         connection.pending.pop(request_id, None)
 
 
+@app.get(
+    "/api/v1/agents/{agent_id}/files/roots",
+    dependencies=[Depends(require_control_token)],
+)
+async def list_agent_file_roots(agent_id: str, settings: SettingsDep) -> FileRootListResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = FileRootListRequest(request_id=request_id)
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, FileRootListResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent file roots timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/files/list",
+    dependencies=[Depends(require_control_token)],
+)
+async def list_agent_directory(
+    agent_id: str, body: DirectoryListBody, settings: SettingsDep
+) -> DirectoryListResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = DirectoryListRequest(request_id=request_id, **body.model_dump())
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, DirectoryListResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "directory_list",
+            agent_id=agent_id,
+            path=body.path,
+            count=len(reply.entries),
+            truncated=reply.truncated,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent directory list timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/files/info",
+    dependencies=[Depends(require_control_token)],
+)
+async def get_agent_file_info(
+    agent_id: str, body: FileInfoBody, settings: SettingsDep
+) -> FileInfoResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = FileInfoRequest(request_id=request_id, path=body.path)
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, FileInfoResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit("file_info", agent_id=agent_id, path=body.path, kind=reply.kind)
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent file info timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
 @app.post(
     "/api/v1/agents/{agent_id}/files/read",
     dependencies=[Depends(require_control_token)],
@@ -1087,6 +1185,12 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
                 reply = CommandSessionDiscardResult.model_validate(payload)
             elif message_type == "ping_result":
                 reply = PingResult.model_validate(payload)
+            elif message_type == "file_root_list_result":
+                reply = FileRootListResult.model_validate(payload)
+            elif message_type == "directory_list_result":
+                reply = DirectoryListResult.model_validate(payload)
+            elif message_type == "file_info_result":
+                reply = FileInfoResult.model_validate(payload)
             elif message_type == "file_read_result":
                 reply = FileReadResult.model_validate(payload)
             elif message_type == "file_write_result":

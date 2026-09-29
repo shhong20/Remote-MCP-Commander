@@ -31,6 +31,9 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "service_logs",
         "git_status",
         "execute",
+        "list_file_roots",
+        "list_directory",
+        "file_info",
         "read_file",
         "write_file",
         "list_processes",
@@ -136,3 +139,17 @@ async def test_diagnostic_tools_use_structured_contracts() -> None:
     assert set(tools["service_logs"].input_schema["required"]) == {"agent_id", "unit"}
     assert tools["service_logs"].input_schema["properties"]["lines"]["default"] == 100
     assert set(tools["git_status"].input_schema["required"]) == {"agent_id", "path"}
+
+
+@pytest.mark.asyncio
+async def test_filesystem_discovery_tools_are_bounded_and_structured() -> None:
+    server = build_mcp(make_settings())
+    async with Client(server) as client:
+        result = await client.list_tools()
+
+    tools = {tool.name: tool for tool in result.tools}
+    assert set(tools["list_file_roots"].input_schema["required"]) == {"agent_id"}
+    assert set(tools["list_directory"].input_schema["required"]) == {"agent_id", "path"}
+    properties = tools["list_directory"].input_schema["properties"]
+    assert properties["limit"]["default"] == 200
+    assert set(tools["file_info"].input_schema["required"]) == {"agent_id", "path"}

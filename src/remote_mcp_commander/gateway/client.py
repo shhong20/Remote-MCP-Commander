@@ -12,7 +12,10 @@ from remote_mcp_commander.protocol import (
     CommandSessionDiscardResult,
     CommandSessionOutput,
     CommandSessionSnapshot,
+    DirectoryListResult,
+    FileInfoResult,
     FileReadResult,
+    FileRootListResult,
     FileWriteResult,
     GitStatusResult,
     PingResponse,
@@ -185,6 +188,35 @@ class GatewayClient:
             f"/api/v1/agents/{agent_id}/commands/sessions/{session_id}/discard",
         )
         return CommandSessionDiscardResult.model_validate(payload)
+
+    async def list_file_roots(self, agent_id: str) -> FileRootListResult:
+        payload = await self._request(
+            "GET",
+            f"/api/v1/agents/{agent_id}/files/roots",
+        )
+        return FileRootListResult.model_validate(payload)
+
+    async def list_directory(
+        self,
+        agent_id: str,
+        path: str,
+        *,
+        limit: int = 200,
+    ) -> DirectoryListResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/files/list",
+            json_body={"path": path, "limit": limit},
+        )
+        return DirectoryListResult.model_validate(payload)
+
+    async def file_info(self, agent_id: str, path: str) -> FileInfoResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/files/info",
+            json_body={"path": path},
+        )
+        return FileInfoResult.model_validate(payload)
 
     async def read_file(
         self,

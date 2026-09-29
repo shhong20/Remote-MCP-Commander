@@ -275,3 +275,51 @@ async def test_diagnostic_methods_use_expected_routes_and_payloads() -> None:
     assert b'"unit":"demo.service"' in requests[2].content
     assert b'"lines":25' in requests[2].content
     assert b'"path":"/srv/repo"' in requests[3].content
+
+
+@pytest.mark.asyncio
+async def test_filesystem_discovery_methods_use_expected_routes() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/roots"):
+            return httpx.Response(
+                200,
+                json={"request_id": "roots", "roots": ["/srv/project"]},
+            )
+        if request.url.path.endswith("/list"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "list",
+                    "path": "/srv/project",
+                    "entries": [],
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "info",
+                "path": "/srv/project/file.txt",
+                "kind": "file",
+                "size": 3,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    roots = await client.list_file_roots("server-01")
+    listed = await client.list_directory("server-01", "/srv/project", limit=25)
+    info = await client.file_info("server-01", "/srv/project/file.txt")
+
+    assert roots.roots == ["/srv/project"]
+    assert listed.path == "/srv/project"
+    assert info.kind == "file"
+    assert requests[0].method == "GET"
+    assert requests[0].url.path.endswith("/files/roots")
+    assert requests[1].method == "POST"
+    assert requests[1].url.path.endswith("/files/list")
+    assert b'"path":"/srv/project"' in requests[1].content
+    assert b'"limit":25' in requests[1].content
+    assert requests[2].url.path.endswith("/files/info")
+    assert b'"path":"/srv/project/file.txt"' in requests[2].content
