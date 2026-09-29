@@ -12,6 +12,8 @@ from remote_mcp_commander.protocol import (
     FileReadResult,
     FileWriteResult,
     PingResponse,
+    ProcessListResult,
+    ServiceStatusResult,
 )
 
 
@@ -112,3 +114,19 @@ class GatewayClient:
             },
         )
         return FileWriteResult.model_validate(payload)
+
+    async def list_processes(self, agent_id: str, *, limit: int = 100) -> ProcessListResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/processes",
+            json_body={"limit": limit},
+        )
+        return ProcessListResult.model_validate(payload)
+
+    async def service_status(self, agent_id: str, unit: str) -> ServiceStatusResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/services/status",
+            json_body={"unit": unit},
+        )
+        return ServiceStatusResult.model_validate(payload)

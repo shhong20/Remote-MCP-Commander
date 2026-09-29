@@ -36,12 +36,25 @@ from remote_mcp_commander.protocol import (
     PingRequest,
     PingResponse,
     PingResult,
+    ProcessListBody,
+    ProcessListRequest,
+    ProcessListResult,
     RegisteredDevice,
     RegisteredDeviceList,
     RevokeResult,
+    ServiceStatusBody,
+    ServiceStatusRequest,
+    ServiceStatusResult,
 )
 
-AgentReply = CommandResult | PingResult | FileReadResult | FileWriteResult
+AgentReply = (
+    CommandResult
+    | PingResult
+    | FileReadResult
+    | FileWriteResult
+    | ProcessListResult
+    | ServiceStatusResult
+)
 
 
 @dataclass
@@ -361,6 +374,72 @@ async def write_file(agent_id: str, body: FileWriteBody, settings: SettingsDep) 
         connection.pending.pop(request_id, None)
 
 
+@app.post(
+    "/api/v1/agents/{agent_id}/processes",
+    dependencies=[Depends(require_control_token)],
+)
+async def process_list(
+    agent_id: str, body: ProcessListBody, settings: SettingsDep
+) -> ProcessListResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = ProcessListRequest(request_id=request_id, limit=body.limit)
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, ProcessListResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "process_list",
+            agent_id=agent_id,
+            count=len(reply.processes),
+            truncated=reply.truncated,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent process list timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/services/status",
+    dependencies=[Depends(require_control_token)],
+)
+async def get_service_status(
+    agent_id: str, body: ServiceStatusBody, settings: SettingsDep
+) -> ServiceStatusResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = ServiceStatusRequest(request_id=request_id, unit=body.unit)
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, ServiceStatusResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "service_status",
+            agent_id=agent_id,
+            unit=body.unit,
+            active_state=reply.active_state,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent service status timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
 @app.websocket("/ws/agent/{agent_id}")
 async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
     settings = get_settings()
@@ -411,6 +490,10 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
                 reply = FileReadResult.model_validate(payload)
             elif message_type == "file_write_result":
                 reply = FileWriteResult.model_validate(payload)
+            elif message_type == "process_list_result":
+                reply = ProcessListResult.model_validate(payload)
+            elif message_type == "service_status_result":
+                reply = ServiceStatusResult.model_validate(payload)
             else:
                 continue
 

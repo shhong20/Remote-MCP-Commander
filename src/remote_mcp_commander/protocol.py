@@ -158,3 +158,55 @@ class FileWriteBody(BaseModel):
     content: str = Field(max_length=1_048_576)
     overwrite: bool = False
     expected_sha256: str | None = Field(default=None, min_length=64, max_length=64)
+
+
+class ProcessInfo(BaseModel):
+    pid: int
+    name: str
+    username: str | None = None
+    status: str | None = None
+    memory_rss: int | None = None
+
+
+class ProcessListRequest(BaseModel):
+    type: Literal["process_list_request"] = "process_list_request"
+    request_id: str
+    limit: int = Field(default=100, ge=1, le=500)
+
+
+class ProcessListResult(BaseModel):
+    type: Literal["process_list_result"] = "process_list_result"
+    request_id: str
+    processes: list[ProcessInfo] = Field(default_factory=list)
+    truncated: bool = False
+    rejected: bool = False
+    error: str | None = None
+
+
+class ProcessListBody(BaseModel):
+    limit: int = Field(default=100, ge=1, le=500)
+
+
+class ServiceStatusRequest(BaseModel):
+    type: Literal["service_status_request"] = "service_status_request"
+    request_id: str
+    unit: str = Field(min_length=1, max_length=256)
+
+
+class ServiceStatusResult(BaseModel):
+    type: Literal["service_status_result"] = "service_status_result"
+    request_id: str
+    unit: str
+    id: str | None = None
+    description: str | None = None
+    load_state: str | None = None
+    active_state: str | None = None
+    sub_state: str | None = None
+    unit_file_state: str | None = None
+    returncode: int | None = None
+    rejected: bool = False
+    error: str | None = None
+
+
+class ServiceStatusBody(BaseModel):
+    unit: str = Field(min_length=1, max_length=256)
