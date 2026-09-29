@@ -12,6 +12,7 @@ from remote_mcp_commander.gateway.client import GatewayClient
 from remote_mcp_commander.protocol import (
     AgentInfo,
     CommandResult,
+    CommandSessionSnapshot,
     FileReadResult,
     FileWriteResult,
     PingResponse,
@@ -82,6 +83,21 @@ def build_mcp(settings: Settings) -> MCPServer:
     async def execute(agent_id: str, argv: list[str]) -> CommandResult:
         """Execute an argv command on a device subject to gateway and agent policies."""
         return await GatewayClient(settings).execute(agent_id, argv)
+
+    @server.tool()
+    async def start_command(agent_id: str, argv: list[str]) -> CommandSessionSnapshot:
+        """Start a bounded safe-profile command session and return its session ID."""
+        return await GatewayClient(settings).start_command_session(agent_id, argv)
+
+    @server.tool()
+    async def command_status(agent_id: str, session_id: str) -> CommandSessionSnapshot:
+        """Read the latest state and bounded output for a command session."""
+        return await GatewayClient(settings).command_session_status(agent_id, session_id)
+
+    @server.tool()
+    async def cancel_command(agent_id: str, session_id: str) -> CommandSessionSnapshot:
+        """Cancel a running command session owned by the current Agent connection."""
+        return await GatewayClient(settings).cancel_command_session(agent_id, session_id)
 
     @server.tool()
     async def read_file(

@@ -9,6 +9,7 @@ from remote_mcp_commander.protocol import (
     AgentInfo,
     AgentList,
     CommandResult,
+    CommandSessionSnapshot,
     FileReadResult,
     FileWriteResult,
     PingResponse,
@@ -80,6 +81,40 @@ class GatewayClient:
             json_body={"argv": argv},
         )
         return CommandResult.model_validate(payload)
+
+    async def start_command_session(
+        self,
+        agent_id: str,
+        argv: list[str],
+    ) -> CommandSessionSnapshot:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/commands/sessions",
+            json_body={"argv": argv},
+        )
+        return CommandSessionSnapshot.model_validate(payload)
+
+    async def command_session_status(
+        self,
+        agent_id: str,
+        session_id: str,
+    ) -> CommandSessionSnapshot:
+        payload = await self._request(
+            "GET",
+            f"/api/v1/agents/{agent_id}/commands/sessions/{session_id}",
+        )
+        return CommandSessionSnapshot.model_validate(payload)
+
+    async def cancel_command_session(
+        self,
+        agent_id: str,
+        session_id: str,
+    ) -> CommandSessionSnapshot:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/commands/sessions/{session_id}/cancel",
+        )
+        return CommandSessionSnapshot.model_validate(payload)
 
     async def read_file(
         self,

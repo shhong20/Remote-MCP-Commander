@@ -6,6 +6,7 @@ from remote_mcp_commander.gateway.app import (
     enforce_agent_policy,
     require_approval_admin_token,
     validate_approval_target,
+    validate_command_session_id,
 )
 
 
@@ -26,7 +27,7 @@ def test_agent_specific_token_overrides_default() -> None:
 
 def test_gateway_policy_allows_listed_executable() -> None:
     settings = make_settings(agent_policies_json='{"server-01":["hostname","uptime"]}')
-    enforce_agent_policy("server-01", ["/bin/hostname"], settings)
+    enforce_agent_policy("server-01", ["hostname"], settings)
 
 
 def test_gateway_policy_denies_unlisted_executable() -> None:
@@ -86,3 +87,27 @@ def test_approval_target_is_operation_specific() -> None:
     with pytest.raises(HTTPException) as exc_info:
         validate_approval_target("process.terminate", "demo.service")
     assert exc_info.value.status_code == 422
+
+
+def test_command_session_id_validation() -> None:
+    validate_command_session_id("a" * 32)
+    with pytest.raises(HTTPException) as exc_info:
+        validate_command_session_id("../bad-session")
+    assert exc_info.value.status_code == 422
+
+
+def test_gateway_policy_rejects_absolute_safe_name_alias() -> None:
+    settings = make_settings(agent_policies_json='{"server-01":["hostname"]}')
+    with pytest.raises(HTTPException) as exc_info:
+        enforce_agent_policy("server-01", ["/tmp/hostname"], settings)
+    assert exc_info.value.status_code == 403
+    assert "bare name" in str(exc_info.value.detail)
+
+
+def test_command_protocol_rejects_oversized_argument() -> None:
+    from pydantic import ValidationError
+
+    from remote_mcp_commander.protocol import ExecuteBody
+
+    with pytest.raises(ValidationError):
+        ExecuteBody(argv=["echo", "x" * 4097])

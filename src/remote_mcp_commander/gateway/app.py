@@ -24,6 +24,7 @@ from fastapi import (
     status,
 )
 
+from remote_mcp_commander import __version__
 from remote_mcp_commander.config import Settings, get_settings
 from remote_mcp_commander.gateway.approvals import ApprovalError, ApprovalStore
 from remote_mcp_commander.gateway.audit import (
@@ -35,6 +36,7 @@ from remote_mcp_commander.gateway.audit import (
 from remote_mcp_commander.gateway.registry import DeviceRegistry
 from remote_mcp_commander.policy import validate_generic_argv
 from remote_mcp_commander.protocol import (
+    SESSION_ID_PATTERN,
     AgentHello,
     AgentInfo,
     AgentList,
@@ -43,6 +45,11 @@ from remote_mcp_commander.protocol import (
     AuditQueryResult,
     CommandRequest,
     CommandResult,
+    CommandSessionCancelRequest,
+    CommandSessionSnapshot,
+    CommandSessionStartBody,
+    CommandSessionStartRequest,
+    CommandSessionStatusRequest,
     EnrollmentClaimBody,
     EnrollmentClaimResult,
     EnrollmentCreateBody,
@@ -83,6 +90,7 @@ AgentReply = (
     | ServiceStatusResult
     | ProcessTerminateResult
     | ServiceActionResult
+    | CommandSessionSnapshot
 )
 
 
@@ -106,7 +114,7 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Remote MCP Commander Gateway",
-    version="0.7.0",
+    version=__version__,
     lifespan=lifespan,
 )
 connections: dict[str, AgentConnection] = {}
@@ -159,6 +167,12 @@ def service_approval_operation(action: str) -> str:
 
 PROCESS_APPROVAL_TARGET_RE = re.compile(r"^pid:(?:[2-9]|[1-9][0-9]+)@[1-9][0-9]*$")
 SERVICE_APPROVAL_TARGET_RE = re.compile(r"^[A-Za-z0-9_.@:-]{1,256}$")
+COMMAND_SESSION_ID_RE = re.compile(SESSION_ID_PATTERN)
+
+
+def validate_command_session_id(session_id: str) -> None:
+    if COMMAND_SESSION_ID_RE.fullmatch(session_id) is None:
+        raise HTTPException(status_code=422, detail="invalid command session id")
 
 
 def validate_approval_target(operation: str, target: str) -> None:
@@ -417,6 +431,117 @@ async def execute(agent_id: str, body: ExecuteBody, settings: SettingsDep) -> Co
     except TimeoutError as exc:
         audit("command_timeout", agent_id=agent_id, request_id=request_id)
         raise HTTPException(status_code=504, detail="agent request timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/commands/sessions",
+    dependencies=[Depends(require_control_token)],
+)
+async def start_command_session(
+    agent_id: str, body: CommandSessionStartBody, settings: SettingsDep
+) -> CommandSessionSnapshot:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    enforce_agent_policy(agent_id, body.argv, settings)
+    request_id = uuid.uuid4().hex
+    session_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    audit(
+        "command_session_start_requested",
+        agent_id=agent_id,
+        session_id=session_id,
+        executable=Path(body.argv[0]).name,
+        argc=len(body.argv),
+    )
+    try:
+        request = CommandSessionStartRequest(
+            request_id=request_id,
+            session_id=session_id,
+            argv=body.argv,
+        )
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, CommandSessionSnapshot):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "command_session_started",
+            agent_id=agent_id,
+            session_id=session_id,
+            state=reply.state,
+            rejected=reply.rejected,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent session start timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.get(
+    "/api/v1/agents/{agent_id}/commands/sessions/{session_id}",
+    dependencies=[Depends(require_control_token)],
+)
+async def get_command_session(
+    agent_id: str, session_id: str, settings: SettingsDep
+) -> CommandSessionSnapshot:
+    validate_command_session_id(session_id)
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = CommandSessionStatusRequest(request_id=request_id, session_id=session_id)
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, CommandSessionSnapshot):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent session status timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/commands/sessions/{session_id}/cancel",
+    dependencies=[Depends(require_control_token)],
+)
+async def cancel_command_session(
+    agent_id: str, session_id: str, settings: SettingsDep
+) -> CommandSessionSnapshot:
+    validate_command_session_id(session_id)
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    audit("command_session_cancel_requested", agent_id=agent_id, session_id=session_id)
+    try:
+        request = CommandSessionCancelRequest(request_id=request_id, session_id=session_id)
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, CommandSessionSnapshot):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "command_session_cancelled",
+            agent_id=agent_id,
+            session_id=session_id,
+            state=reply.state,
+            rejected=reply.rejected,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent session cancel timed out") from exc
     except ConnectionError as exc:
         raise HTTPException(status_code=503, detail="agent disconnected") from exc
     finally:
@@ -739,6 +864,8 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
 
             if message_type == "command_result":
                 reply: AgentReply = CommandResult.model_validate(payload)
+            elif message_type == "command_session_snapshot":
+                reply = CommandSessionSnapshot.model_validate(payload)
             elif message_type == "ping_result":
                 reply = PingResult.model_validate(payload)
             elif message_type == "file_read_result":

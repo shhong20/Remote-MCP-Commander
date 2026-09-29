@@ -7,8 +7,10 @@ import socket
 
 import websockets
 
+from remote_mcp_commander import __version__
 from remote_mcp_commander.agent.executor import execute_argv
 from remote_mcp_commander.agent.file_ops import allowed_roots, read_text_file, write_text_file
+from remote_mcp_commander.agent.session_ops import CommandSessionManager
 from remote_mcp_commander.agent.system_ops import (
     list_processes,
     service_action,
@@ -19,6 +21,9 @@ from remote_mcp_commander.config import get_settings
 from remote_mcp_commander.protocol import (
     AgentHello,
     CommandRequest,
+    CommandSessionCancelRequest,
+    CommandSessionStartRequest,
+    CommandSessionStatusRequest,
     FileReadRequest,
     FileWriteRequest,
     Heartbeat,
@@ -53,10 +58,18 @@ async def agent_loop() -> None:
                 ping_timeout=20,
                 max_size=2_097_152,
             ) as websocket:
+                sessions = CommandSessionManager(
+                    allowlist=settings.executable_allowlist,
+                    timeout_s=settings.session_timeout_s,
+                    max_output_bytes=settings.max_output_bytes,
+                    max_active=settings.session_max_active,
+                    history_limit=settings.session_history_limit,
+                )
                 hello = AgentHello(
                     agent_id=settings.agent_id,
                     hostname=socket.gethostname(),
                     platform=platform.platform(),
+                    version=__version__,
                 )
                 await websocket.send(hello.model_dump_json())
                 heartbeat_task = asyncio.create_task(heartbeat_loop(websocket, settings.agent_id))
@@ -69,6 +82,28 @@ async def agent_loop() -> None:
                             await websocket.send(
                                 PingResult(request_id=ping.request_id).model_dump_json()
                             )
+                            continue
+
+                        if message_type == "command_session_start_request":
+                            request = CommandSessionStartRequest.model_validate(payload)
+                            result = await sessions.start(
+                                request.request_id,
+                                request.session_id,
+                                request.argv,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "command_session_status_request":
+                            request = CommandSessionStatusRequest.model_validate(payload)
+                            result = await sessions.status(request.request_id, request.session_id)
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "command_session_cancel_request":
+                            request = CommandSessionCancelRequest.model_validate(payload)
+                            result = await sessions.cancel(request.request_id, request.session_id)
+                            await websocket.send(result.model_dump_json())
                             continue
 
                         if message_type == "file_read_request":
@@ -146,6 +181,7 @@ async def agent_loop() -> None:
                         await websocket.send(result.model_dump_json())
                 finally:
                     heartbeat_task.cancel()
+                    await sessions.cancel_all()
                     await asyncio.gather(heartbeat_task, return_exceptions=True)
         except (OSError, websockets.ConnectionClosed):
             await asyncio.sleep(2)
