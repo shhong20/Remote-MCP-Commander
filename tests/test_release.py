@@ -1,16 +1,21 @@
 from __future__ import annotations
 
+import json
 import os
+import subprocess
 from pathlib import Path
 
 import pytest
 from cryptography.hazmat.primitives import serialization
 from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
+import remote_mcp_commander.release as release_module
 from remote_mcp_commander.release import (
+    HealthRollbackError,
     ReleaseError,
     _validate_root,
     activate,
+    activate_checked,
     main,
     rollback,
     status,
@@ -63,6 +68,7 @@ def make_root(tmp_path: Path) -> Path:
         )
     )
     public_path.chmod(0o644)
+    release_module.NATIVE_RELEASE_ROOT = root.resolve()
     return root
 
 
@@ -243,3 +249,239 @@ def test_activate_rejects_sealed_but_unsigned_release(tmp_path: Path) -> None:
 
     with pytest.raises(SigningError, match="signature"):
         activate(root, "unsigned")
+
+
+def test_checked_activation_restarts_and_confirms_health(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = make_root(tmp_path)
+    make_release(root, "v1")
+    make_release(root, "v2")
+    activate(root, "v1")
+    restarts: list[str] = []
+    monkeypatch.setattr(
+        release_module,
+        "_restart_native_stack",
+        lambda: restarts.append("restart"),
+    )
+    monkeypatch.setattr(
+        release_module,
+        "_wait_for_native_stack",
+        lambda **_kwargs: 2,
+    )
+
+    result = activate_checked(root, "v2", timeout_seconds=5, interval_seconds=0.1)
+
+    assert result.current == "v2"
+    assert result.previous == "v1"
+    assert restarts == ["restart"]
+
+
+def test_checked_activation_automatically_rolls_back_failed_candidate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = make_root(tmp_path)
+    make_release(root, "v1")
+    make_release(root, "v2")
+    activate(root, "v1")
+    restarts: list[str] = []
+    health_results = iter([None, 1])
+    monkeypatch.setattr(
+        release_module,
+        "_restart_native_stack",
+        lambda: restarts.append("restart"),
+    )
+    monkeypatch.setattr(
+        release_module,
+        "_wait_for_native_stack",
+        lambda **_kwargs: next(health_results),
+    )
+
+    with pytest.raises(HealthRollbackError) as captured:
+        activate_checked(root, "v2", timeout_seconds=5, interval_seconds=0.1)
+
+    assert captured.value.rolled_back is True
+    assert captured.value.recovery_healthy is True
+    assert status(root).current == "v1"
+    assert status(root).previous == "v2"
+    assert restarts == ["restart", "restart"]
+
+
+def test_checked_activation_reports_failed_recovery(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = make_root(tmp_path)
+    make_release(root, "v1")
+    make_release(root, "v2")
+    activate(root, "v1")
+    health_results = iter([None, None])
+    monkeypatch.setattr(release_module, "_restart_native_stack", lambda: None)
+    monkeypatch.setattr(
+        release_module,
+        "_wait_for_native_stack",
+        lambda **_kwargs: next(health_results),
+    )
+
+    with pytest.raises(HealthRollbackError) as captured:
+        activate_checked(root, "v2", timeout_seconds=5, interval_seconds=0.1)
+
+    assert captured.value.rolled_back is True
+    assert captured.value.recovery_healthy is False
+    assert status(root).current == "v1"
+    assert status(root).previous == "v2"
+
+
+def test_checked_activation_rolls_back_when_candidate_restart_fails(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = make_root(tmp_path)
+    make_release(root, "v1")
+    make_release(root, "v2")
+    activate(root, "v1")
+    restart_count = 0
+
+    def restart() -> None:
+        nonlocal restart_count
+        restart_count += 1
+        if restart_count == 1:
+            raise ReleaseError("candidate restart failed")
+
+    monkeypatch.setattr(release_module, "_restart_native_stack", restart)
+    monkeypatch.setattr(
+        release_module,
+        "_wait_for_native_stack",
+        lambda **_kwargs: 1,
+    )
+
+    with pytest.raises(HealthRollbackError) as captured:
+        activate_checked(root, "v2", timeout_seconds=5, interval_seconds=0.1)
+
+    assert captured.value.rolled_back is True
+    assert captured.value.recovery_healthy is True
+    assert status(root).current == "v1"
+    assert restart_count == 2
+
+
+def test_checked_activation_requires_rollback_target_and_new_candidate(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = make_root(tmp_path)
+    make_release(root, "v1")
+    make_release(root, "v2")
+    monkeypatch.setattr(release_module, "_restart_native_stack", lambda: None)
+    monkeypatch.setattr(
+        release_module,
+        "_wait_for_native_stack",
+        lambda **_kwargs: 1,
+    )
+
+    with pytest.raises(ReleaseError, match="existing current"):
+        activate_checked(root, "v2")
+    activate(root, "v1")
+    with pytest.raises(ReleaseError, match="different candidate"):
+        activate_checked(root, "v1")
+    with pytest.raises(ReleaseError, match="health timeout"):
+        activate_checked(root, "v2", timeout_seconds=0.5)
+
+
+def test_checked_activation_verifies_current_before_switch(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = make_root(tmp_path)
+    current = make_release(root, "v1")
+    make_release(root, "v2")
+    activate(root, "v1")
+    (current / "pyproject.toml").chmod(0o600)
+    (current / "pyproject.toml").write_text('[project]\nname="changed"\nversion="0.16.0"\n')
+    monkeypatch.setattr(release_module, "_restart_native_stack", lambda: None)
+
+    with pytest.raises(IntegrityError):
+        activate_checked(root, "v2")
+
+    assert os.readlink(root / "current") == "releases/v1"
+
+
+def test_checked_activation_cli_reports_rollback_result(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    root = make_root(tmp_path)
+    make_release(root, "v1")
+    make_release(root, "v2")
+    activate(root, "v1")
+    health_results = iter([None, 1])
+    monkeypatch.setattr(release_module, "_restart_native_stack", lambda: None)
+    monkeypatch.setattr(
+        release_module,
+        "_wait_for_native_stack",
+        lambda **_kwargs: next(health_results),
+    )
+
+    assert (
+        main(
+            [
+                "--root",
+                str(root),
+                "--json",
+                "activate-checked",
+                "v2",
+                "--timeout-seconds",
+                "5",
+                "--interval-seconds",
+                "0.1",
+            ]
+        )
+        == 1
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["rolled_back"] is True
+    assert payload["recovery_healthy"] is True
+    assert status(root).current == "v1"
+
+
+def test_native_stack_restart_uses_fixed_systemd_units(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    systemctl = tmp_path / "systemctl"
+    systemctl.write_text("#!/bin/sh\nexit 0\n")
+    systemctl.chmod(0o755)
+    captured: dict[str, object] = {}
+
+    def fake_run(command, **kwargs):
+        captured["command"] = command
+        captured["kwargs"] = kwargs
+        return subprocess.CompletedProcess(command, 0)
+
+    monkeypatch.setattr(release_module, "SYSTEMCTL_PATH", systemctl)
+    monkeypatch.setattr(release_module.subprocess, "run", fake_run)
+
+    release_module._restart_native_stack()
+
+    assert captured["command"] == [
+        str(systemctl),
+        "restart",
+        "remote-mcp-gateway.service",
+        "remote-mcp-server.service",
+        "--no-pager",
+    ]
+    assert captured["kwargs"]["env"] == {
+        "PATH": "/usr/bin:/bin",
+        "LANG": "C",
+        "LC_ALL": "C",
+    }
+
+
+def test_checked_activation_rejects_non_native_root(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = make_root(tmp_path)
+    make_release(root, "v1")
+    make_release(root, "v2")
+    activate(root, "v1")
+    monkeypatch.setattr(
+        release_module,
+        "NATIVE_RELEASE_ROOT",
+        (tmp_path / "different-native-root").resolve(),
+    )
+
+    with pytest.raises(ReleaseError, match="native deployment root"):
+        activate_checked(root, "v2")

@@ -4,10 +4,14 @@ import argparse
 import json
 import os
 import re
+import subprocess
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
+
+import httpx
 
 from remote_mcp_commander.release_integrity import (
     IntegrityError,
@@ -29,6 +33,13 @@ except ImportError:  # pragma: no cover - non-POSIX fallback
 
 RELEASE_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$")
 _LINK_NAMES = {"current", "previous"}
+SYSTEMCTL_PATH = Path("/usr/bin/systemctl")
+NATIVE_STACK_UNITS = (
+    "remote-mcp-gateway.service",
+    "remote-mcp-server.service",
+)
+GATEWAY_HEALTH_URL = "http://127.0.0.1:8765/healthz"
+NATIVE_RELEASE_ROOT = Path("/opt/remote-mcp-commander")
 
 
 @dataclass(frozen=True)
@@ -43,6 +54,19 @@ class ReleaseStatus:
 
 class ReleaseError(RuntimeError):
     pass
+
+
+class HealthRollbackError(ReleaseError):
+    def __init__(
+        self,
+        message: str,
+        *,
+        rolled_back: bool,
+        recovery_healthy: bool,
+    ) -> None:
+        super().__init__(message)
+        self.rolled_back = rolled_back
+        self.recovery_healthy = recovery_healthy
 
 
 def _validate_root(raw_root: str) -> Path:
@@ -173,6 +197,151 @@ def status(root: Path) -> ReleaseStatus:
     )
 
 
+def _run_systemctl(arguments: list[str], *, check: bool) -> subprocess.CompletedProcess[bytes]:
+    if (
+        SYSTEMCTL_PATH.is_symlink()
+        or not SYSTEMCTL_PATH.is_file()
+        or not os.access(SYSTEMCTL_PATH, os.X_OK)
+    ):
+        raise ReleaseError("trusted systemctl executable is unavailable")
+    try:
+        return subprocess.run(
+            [str(SYSTEMCTL_PATH), *arguments],
+            check=check,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            timeout=30,
+            env={"PATH": "/usr/bin:/bin", "LANG": "C", "LC_ALL": "C"},
+        )
+    except (OSError, subprocess.CalledProcessError, subprocess.TimeoutExpired) as exc:
+        raise ReleaseError("native stack service control failed") from exc
+
+
+def _restart_native_stack() -> None:
+    _run_systemctl(["restart", *NATIVE_STACK_UNITS, "--no-pager"], check=True)
+
+
+def _native_stack_healthy() -> bool:
+    try:
+        service_state = _run_systemctl(
+            ["is-active", "--quiet", *NATIVE_STACK_UNITS],
+            check=False,
+        )
+        if service_state.returncode != 0:
+            return False
+        with httpx.Client(
+            timeout=httpx.Timeout(2.0),
+            follow_redirects=False,
+            trust_env=False,
+        ) as client:
+            response = client.get(GATEWAY_HEALTH_URL)
+        return response.status_code == 200 and response.json() == {"status": "ok"}
+    except (ReleaseError, httpx.HTTPError, ValueError):
+        return False
+
+
+def _wait_for_native_stack(
+    *,
+    timeout_seconds: float,
+    interval_seconds: float,
+) -> int | None:
+    if not 1.0 <= timeout_seconds <= 300.0:
+        raise ReleaseError("health timeout must be between 1 and 300 seconds")
+    if not 0.1 <= interval_seconds <= min(10.0, timeout_seconds):
+        raise ReleaseError("health interval must be between 0.1 seconds and the timeout")
+    deadline = time.monotonic() + timeout_seconds
+    attempts = 0
+    while True:
+        attempts += 1
+        if _native_stack_healthy():
+            return attempts
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            return None
+        time.sleep(min(interval_seconds, remaining))
+
+
+def activate_checked(
+    root: Path,
+    release_id: str,
+    *,
+    trusted_keys_dir: Path | None = None,
+    timeout_seconds: float = 30.0,
+    interval_seconds: float = 0.5,
+) -> ReleaseStatus:
+    if root.resolve(strict=True) != NATIVE_RELEASE_ROOT:
+        raise ReleaseError("checked activation requires the native deployment root")
+    candidate = _release_dir(root, release_id)
+    trust = trusted_keys_dir or root / "trusted-release-keys"
+    if not 1.0 <= timeout_seconds <= 300.0:
+        raise ReleaseError("health timeout must be between 1 and 300 seconds")
+    if not 0.1 <= interval_seconds <= min(10.0, timeout_seconds):
+        raise ReleaseError("health interval must be between 0.1 seconds and the timeout")
+
+    with _release_lock(root):
+        verify_signed_release(candidate, trusted_keys_dir=trust)
+        original = _read_release_link(root, "current")
+        if original is None:
+            raise ReleaseError("checked activation requires an existing current release")
+        if original == release_id:
+            raise ReleaseError("checked activation requires a different candidate release")
+        original_dir = _release_dir(root, original)
+        verify_signed_release(original_dir, trusted_keys_dir=trust)
+
+        _replace_link(root, "previous", original)
+        _replace_link(root, "current", release_id)
+        failure = "candidate health check timed out"
+        try:
+            _restart_native_stack()
+            if (
+                _wait_for_native_stack(
+                    timeout_seconds=timeout_seconds,
+                    interval_seconds=interval_seconds,
+                )
+                is not None
+            ):
+                return status(root)
+        except ReleaseError as exc:
+            failure = str(exc)
+
+        try:
+            verify_signed_release(original_dir, trusted_keys_dir=trust)
+            _replace_link(root, "current", original)
+            _replace_link(root, "previous", release_id)
+        except (OSError, ReleaseError, IntegrityError, SigningError) as exc:
+            raise HealthRollbackError(
+                f"{failure}; automatic rollback could not restore the previous release",
+                rolled_back=False,
+                recovery_healthy=False,
+            ) from exc
+
+        recovery_healthy = False
+        try:
+            _restart_native_stack()
+            recovery_healthy = (
+                _wait_for_native_stack(
+                    timeout_seconds=timeout_seconds,
+                    interval_seconds=interval_seconds,
+                )
+                is not None
+            )
+        except ReleaseError:
+            recovery_healthy = False
+
+        if not recovery_healthy:
+            raise HealthRollbackError(
+                f"{failure}; previous release was restored but failed its recovery health check",
+                rolled_back=True,
+                recovery_healthy=False,
+            )
+        raise HealthRollbackError(
+            f"{failure}; previous release was restored and is healthy",
+            rolled_back=True,
+            recovery_healthy=True,
+        )
+
+
 def activate(
     root: Path,
     release_id: str,
@@ -277,6 +446,10 @@ def main(argv: list[str] | None = None) -> int:
     verify_parser.add_argument("release_id")
     activate_parser = subparsers.add_parser("activate")
     activate_parser.add_argument("release_id")
+    checked_parser = subparsers.add_parser("activate-checked")
+    checked_parser.add_argument("release_id")
+    checked_parser.add_argument("--timeout-seconds", type=float, default=30.0)
+    checked_parser.add_argument("--interval-seconds", type=float, default=0.5)
     subparsers.add_parser("rollback")
     args = parser.parse_args(argv)
 
@@ -314,8 +487,32 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         elif args.action == "activate":
             result = activate(root, args.release_id, trusted_keys_dir=trust)
+        elif args.action == "activate-checked":
+            result = activate_checked(
+                root,
+                args.release_id,
+                trusted_keys_dir=trust,
+                timeout_seconds=args.timeout_seconds,
+                interval_seconds=args.interval_seconds,
+            )
         else:
             result = rollback(root, trusted_keys_dir=trust)
+    except HealthRollbackError as exc:
+        if args.json_output:
+            print(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "error": str(exc),
+                        "rolled_back": exc.rolled_back,
+                        "recovery_healthy": exc.recovery_healthy,
+                    },
+                    sort_keys=True,
+                )
+            )
+        else:
+            print(f"release health error: {exc}")
+        return 1
     except (OSError, ReleaseError, IntegrityError, SigningError) as exc:
         if args.json_output:
             print(json.dumps({"ok": False, "error": str(exc)}, sort_keys=True))
