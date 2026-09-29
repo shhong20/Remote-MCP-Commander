@@ -40,6 +40,11 @@ class Settings(BaseSettings):
     session_timeout_s: float = Field(default=300.0, ge=1.0, le=3600.0)
     session_max_active: int = Field(default=4, ge=1, le=32)
     session_history_limit: int = Field(default=100, ge=10, le=200)
+    pty_allowed_executables: str = ""
+    pty_agent_policies_json: str = "{}"
+    pty_timeout_s: float = Field(default=900.0, ge=1.0, le=3600.0)
+    pty_max_active: int = Field(default=1, ge=1, le=4)
+    pty_input_max_bytes: int = Field(default=16_384, ge=1, le=65_536)
     allowed_roots_json: str = "[]"
     file_max_bytes: int = Field(default=1_048_576, ge=1, le=1_048_576)
 
@@ -58,6 +63,24 @@ class Settings(BaseSettings):
     @property
     def executable_allowlist(self) -> set[str]:
         return {item.strip() for item in self.allowed_executables.split(",") if item.strip()}
+
+    @property
+    def pty_executable_allowlist(self) -> set[str]:
+        return {
+            item.strip() for item in self.pty_allowed_executables.split(",") if item.strip()
+        }
+
+    @property
+    def pty_agent_policies(self) -> dict[str, set[str]]:
+        data = json.loads(self.pty_agent_policies_json)
+        if not isinstance(data, dict):
+            raise ValueError("COMMANDER_PTY_AGENT_POLICIES_JSON must be a JSON object")
+        policies: dict[str, set[str]] = {}
+        for agent_id, executables in data.items():
+            if not isinstance(executables, list):
+                raise ValueError(f"PTY policy for {agent_id} must be a JSON array")
+            policies[str(agent_id)] = {str(item) for item in executables}
+        return policies
 
     @property
     def agent_tokens(self) -> dict[str, str]:

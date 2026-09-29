@@ -45,6 +45,13 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "cancel_command",
         "command_output",
         "discard_command",
+        "start_pty",
+        "pty_status",
+        "write_pty",
+        "resize_pty",
+        "pty_output",
+        "cancel_pty",
+        "discard_pty",
     }
 
 
@@ -93,6 +100,8 @@ async def test_mutation_tools_require_external_approval_fields() -> None:
     }
     service_schema = tools["service_action"].input_schema
     assert {"approval_id", "approval_secret"}.issubset(service_schema["required"])
+    pty_schema = tools["start_pty"].input_schema
+    assert {"approval_id", "approval_secret"}.issubset(pty_schema["required"])
 
 
 @pytest.mark.asyncio
@@ -125,6 +134,26 @@ async def test_command_session_tools_use_structured_contracts() -> None:
         "agent_id",
         "session_id",
     }
+
+
+@pytest.mark.asyncio
+async def test_pty_tools_use_structured_contracts() -> None:
+    server = build_mcp(make_settings())
+    async with Client(server) as client:
+        result = await client.list_tools()
+
+    tools = {tool.name: tool for tool in result.tools}
+    start = tools["start_pty"].input_schema
+    assert start["properties"]["argv"]["type"] == "array"
+    assert {"agent_id", "argv", "approval_id", "approval_secret"}.issubset(start["required"])
+    assert start["properties"]["columns"]["default"] == 80
+    assert start["properties"]["rows"]["default"] == 24
+    assert set(tools["write_pty"].input_schema["required"]) == {
+        "agent_id",
+        "session_id",
+        "data",
+    }
+    assert tools["pty_output"].input_schema["properties"]["offset"]["default"] == 0
 
 
 @pytest.mark.asyncio

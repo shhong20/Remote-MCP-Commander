@@ -232,6 +232,102 @@ async def test_command_session_methods_use_expected_routes() -> None:
 
 
 @pytest.mark.asyncio
+async def test_pty_session_methods_use_expected_routes_and_payloads() -> None:
+    requests: list[httpx.Request] = []
+    session_id = "b" * 32
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        path = request.url.path
+        if path.endswith("/input"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "input",
+                    "session_id": session_id,
+                    "accepted_bytes": 2,
+                },
+            )
+        if path.endswith("/resize"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "resize",
+                    "session_id": session_id,
+                    "columns": 120,
+                    "rows": 40,
+                },
+            )
+        if path.endswith("/output"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "output",
+                    "session_id": session_id,
+                    "state": "running",
+                    "output": "ok",
+                    "next_offset": 5,
+                },
+            )
+        if path.endswith("/discard"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "discard",
+                    "session_id": session_id,
+                    "discarded": True,
+                },
+            )
+        state = "cancelled" if path.endswith("/cancel") else "running"
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "snapshot",
+                "session_id": session_id,
+                "executable": "bash",
+                "state": state,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    started = await client.start_pty_session(
+        "server-01",
+        ["bash"],
+        "approval-1",
+        "approval-secret-value",
+        columns=100,
+        rows=30,
+    )
+    status = await client.pty_session_status("server-01", session_id)
+    accepted = await client.write_pty_input("server-01", session_id, "x\n")
+    resized = await client.resize_pty_session(
+        "server-01", session_id, columns=120, rows=40
+    )
+    output = await client.pty_session_output(
+        "server-01", session_id, offset=3, max_chars=4
+    )
+    cancelled = await client.cancel_pty_session("server-01", session_id)
+    discarded = await client.discard_pty_session("server-01", session_id)
+
+    assert started.state == "running"
+    assert status.state == "running"
+    assert accepted.accepted_bytes == 2
+    assert (resized.columns, resized.rows) == (120, 40)
+    assert output.output == "ok"
+    assert cancelled.state == "cancelled"
+    assert discarded.discarded is True
+    assert requests[0].url.path.endswith("/pty/sessions")
+    assert b'"argv":["bash"]' in requests[0].content
+    assert b'"approval_id":"approval-1"' in requests[0].content
+    assert requests[1].method == "GET"
+    assert requests[2].url.path.endswith("/input")
+    assert requests[3].url.path.endswith("/resize")
+    assert requests[4].url.path.endswith("/output")
+    assert requests[5].url.path.endswith("/cancel")
+    assert requests[6].url.path.endswith("/discard")
+
+
+@pytest.mark.asyncio
 async def test_diagnostic_methods_use_expected_routes_and_payloads() -> None:
     requests: list[httpx.Request] = []
 

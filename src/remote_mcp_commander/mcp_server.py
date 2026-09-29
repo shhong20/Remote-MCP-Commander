@@ -25,6 +25,11 @@ from remote_mcp_commander.protocol import (
     PortLookupResult,
     ProcessListResult,
     ProcessTerminateResult,
+    PtySessionDiscardResult,
+    PtySessionInputResult,
+    PtySessionOutput,
+    PtySessionResizeResult,
+    PtySessionSnapshot,
     ServiceAction,
     ServiceActionResult,
     ServiceLogsResult,
@@ -149,6 +154,68 @@ def build_mcp(settings: Settings) -> MCPServer:
     async def discard_command(agent_id: str, session_id: str) -> CommandSessionDiscardResult:
         """Discard a completed command session from Agent history."""
         return await GatewayClient(settings).discard_command_session(agent_id, session_id)
+
+    @server.tool()
+    async def start_pty(
+        agent_id: str,
+        argv: list[str],
+        approval_id: str,
+        approval_secret: str,
+        columns: int = 80,
+        rows: int = 24,
+    ) -> PtySessionSnapshot:
+        """Start an approved interactive POSIX PTY under separate Agent and Gateway policy."""
+        return await GatewayClient(settings).start_pty_session(
+            agent_id,
+            argv,
+            approval_id,
+            approval_secret,
+            columns=columns,
+            rows=rows,
+        )
+
+    @server.tool()
+    async def pty_status(agent_id: str, session_id: str) -> PtySessionSnapshot:
+        """Read state and retained output for an approved PTY session."""
+        return await GatewayClient(settings).pty_session_status(agent_id, session_id)
+
+    @server.tool()
+    async def write_pty(
+        agent_id: str, session_id: str, data: str
+    ) -> PtySessionInputResult:
+        """Write bounded UTF-8 input to a running approved PTY session."""
+        return await GatewayClient(settings).write_pty_input(agent_id, session_id, data)
+
+    @server.tool()
+    async def resize_pty(
+        agent_id: str, session_id: str, columns: int, rows: int
+    ) -> PtySessionResizeResult:
+        """Resize a running approved PTY session."""
+        return await GatewayClient(settings).resize_pty_session(
+            agent_id, session_id, columns=columns, rows=rows
+        )
+
+    @server.tool()
+    async def pty_output(
+        agent_id: str,
+        session_id: str,
+        offset: int = 0,
+        max_chars: int = 8192,
+    ) -> PtySessionOutput:
+        """Read only new bounded PTY output using a character cursor."""
+        return await GatewayClient(settings).pty_session_output(
+            agent_id, session_id, offset=offset, max_chars=max_chars
+        )
+
+    @server.tool()
+    async def cancel_pty(agent_id: str, session_id: str) -> PtySessionSnapshot:
+        """Cancel a running PTY session owned by the current Agent connection."""
+        return await GatewayClient(settings).cancel_pty_session(agent_id, session_id)
+
+    @server.tool()
+    async def discard_pty(agent_id: str, session_id: str) -> PtySessionDiscardResult:
+        """Discard a completed PTY session from Agent history."""
+        return await GatewayClient(settings).discard_pty_session(agent_id, session_id)
 
     @server.tool()
     async def list_file_roots(agent_id: str) -> FileRootListResult:

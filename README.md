@@ -27,7 +27,7 @@ Agents initiate outbound connections, so controlled hosts do not need inbound SS
 ## Current MVP
 
 - MCP Python SDK v2 tool server
-- MCP tools for devices, bounded files, cancellable command sessions, system inspection, and approval-gated mutations
+- MCP tools for devices, bounded files, cancellable command/PTY sessions, system inspection, and approval-gated mutations
 - Streamable HTTP for deployed MCP access; stdio for local MCP clients
 - MCP bearer-token verification for Streamable HTTP
 - Persistent outbound Agent -> Gateway WebSocket
@@ -46,6 +46,7 @@ Agents initiate outbound connections, so controlled hosts do not need inbound SS
 - Domain-separated Ed25519 publication signatures for package manifests and runtime locks
 - Atomic, content-addressed local registry for trusted package/runtime artifact sets
 - Fixed native-stack activation with bounded health checks and automatic trusted rollback
+- Approval-gated POSIX PTY sessions under separate deny-by-default Gateway and Agent policy
 - Ruff + pytest CI
 
 ## Quick start
@@ -111,6 +112,10 @@ The current MCP tools are intentionally narrow:
 - `command_output(agent_id, session_id, stdout_offset, stderr_offset, max_chars)` - fetch only new output using character cursors
 - `cancel_command(agent_id, session_id)` - request TERM, then KILL after a short grace period if needed
 - `discard_command(agent_id, session_id)` - explicitly remove a completed session from Agent history
+- `start_pty(...)` - start a POSIX PTY after consuming an external approval bound to the exact argv
+- `pty_status(...)`, `pty_output(...)` - read bounded PTY state/output
+- `write_pty(...)`, `resize_pty(...)` - send bounded input or update terminal dimensions
+- `cancel_pty(...)`, `discard_pty(...)` - terminate or remove a connection-scoped PTY session
 - `read_file(agent_id, path, offset, max_bytes)` - bounded text reads inside configured roots
 - `write_file(agent_id, path, content, overwrite, expected_sha256)` - bounded atomic text writes
 - `list_processes(agent_id, limit)` - bounded process metadata without command lines/environments
@@ -127,6 +132,8 @@ Connected Agents advertise a bounded capability set derived from their real loca
 Read-only diagnostics do not widen generic execution. Port lookup uses psutil without returning process command lines or environments. Service logs call a fixed trusted-path `journalctl` argv with validated unit names and bounded lines/output. Git status is restricted to normal `.git/` directory repositories fully inside configured allowed roots; gitfile/worktree and symlink metadata are rejected, and fsmonitor/hooks/global configuration/pagers are disabled for the fixed status command. See `docs/read-only-diagnostics.md`.
 
 Command sessions use the exact same generic policy. They persist across MCP calls while the Agent WebSocket connection is alive, incrementally drain bounded stdout/stderr, support cursor-based output polling without retransmitting already-consumed text, enforce active/history limits and a session timeout, and are cancelled when that connection is torn down. Terminal states are published only after output readers finish, so a completed snapshot cannot race ahead of its final retained output. They are not interactive PTYs and do not widen the executable surface. See `docs/command-sessions.md`.
+
+Interactive PTY sessions are a separate POSIX-only surface and are disabled by default. Starting one requires an exact-argv, one-use external approval plus matching `COMMANDER_PTY_AGENT_POLICIES_JSON` Gateway policy and `COMMANDER_PTY_ALLOWED_EXECUTABLES` Agent allowlist. Input content and output are never copied into the audit journal; only bounded metadata is recorded. See `docs/interactive-pty.md`.
 
 Filesystem discovery uses the same allowed-root boundary. Directory listing is non-recursive and bounded to 500 entries. Entries expose only name/path/type, regular-file size, and modification time; symlink targets are not followed or returned. `file_info` uses lstat-style metadata for the final path, so an allowed-root symlink cannot reveal its target metadata/content. See `docs/filesystem-discovery.md`.
 
@@ -148,13 +155,15 @@ Before starting a service manually, run `remote-mcp-doctor gateway`, `remote-mcp
 
 ## Mutation approvals
 
-Approval creation is deliberately outside the MCP tool surface. An operator uses the Gateway `POST /api/v1/approvals` endpoint with the separate `COMMANDER_APPROVAL_ADMIN_TOKEN`. The request binds an approval to one `agent_id`, one operation (`process.terminate`, `service.start`, `service.stop`, or `service.restart`), and one exact target.
+Approval creation is deliberately outside the MCP tool surface. An operator uses the Gateway `POST /api/v1/approvals` endpoint with the separate `COMMANDER_APPROVAL_ADMIN_TOKEN`. The request binds an approval to one `agent_id`, one operation (`process.terminate`, `service.start`, `service.stop`, `service.restart`, or `pty.start`), and one exact target.
 
 The Gateway returns an approval ID and short-lived secret. It stores only the secret hash. The pair can be consumed once; concurrent replay attempts allow only one consumer. Wrong secrets or mismatched Agent/action/target values do not consume the legitimate grant. Pending approvals are in-memory in this MVP, so Gateway restart invalidates them.
 
 Process approvals use the canonical target `pid:<pid>@<create_time_ms>`, where `create_time_ms` comes from `list_processes`. The Agent rechecks that process creation time immediately before termination so a reused PID cannot authorize a different process. It requests graceful termination only and never escalates to a hard kill.
 
 Service approvals bind the exact unit name and action. The Agent executes a fixed `systemctl <action> <unit> --no-pager` argv without a shell and never invokes `sudo`, so the operation is limited to the Agent OS user's existing privileges.
+
+PTY approvals bind the SHA-256 of a canonical exact argv. Generate the target with `remote-mcp-pty-target -- <executable> [arguments...]`; changing even one argument requires a new approval.
 
 The Gateway consumes the approval before dispatching the mutation. This gives at-most-once behavior: after a timeout or disconnect, a fresh operator approval is required instead of replaying the old authorization.
 
@@ -186,7 +195,6 @@ The journal is append-only JSONL, bounds tail scans, and centrally redacts sensi
 
 ## Planned next
 
-- interactive PTY sessions with a separate approval/policy boundary
 - cryptographic audit chaining, retention, and remote log shipping
 - multi-user RBAC and stronger OAuth/OIDC integration
 - signed/versioned policy distribution to Agents

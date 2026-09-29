@@ -4,6 +4,8 @@ from fastapi import HTTPException
 from remote_mcp_commander.config import Settings
 from remote_mcp_commander.gateway.app import (
     enforce_agent_policy,
+    enforce_pty_policy,
+    pty_approval_target,
     require_approval_admin_token,
     validate_approval_target,
     validate_command_session_id,
@@ -84,9 +86,40 @@ def test_approval_admin_is_separate_from_control_auth() -> None:
 def test_approval_target_is_operation_specific() -> None:
     validate_approval_target("process.terminate", "pid:123@456789")
     validate_approval_target("service.restart", "demo.service")
+    validate_approval_target("pty.start", pty_approval_target(["bash"]))
     with pytest.raises(HTTPException) as exc_info:
         validate_approval_target("process.terminate", "demo.service")
     assert exc_info.value.status_code == 422
+
+
+def test_pty_policy_is_separate_and_fails_closed() -> None:
+    settings = make_settings(
+        agent_policies_json='{"server-01":["bash"]}',
+        pty_agent_policies_json="{}",
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        enforce_pty_policy("server-01", ["bash"], settings)
+    assert exc_info.value.status_code == 403
+    assert "PTY policy denied" in str(exc_info.value.detail)
+
+    allowed = make_settings(pty_agent_policies_json='{"server-01":["bash"]}')
+    enforce_pty_policy("server-01", ["bash"], allowed)
+
+
+def test_pty_approval_target_binds_full_argv() -> None:
+    first = pty_approval_target(["bash"])
+    second = pty_approval_target(["bash", "-l"])
+    assert first != second
+    assert first.startswith("argv-sha256:")
+    with pytest.raises(HTTPException):
+        validate_approval_target("pty.start", "bash")
+
+
+def test_pty_policy_rejects_absolute_executable() -> None:
+    settings = make_settings(pty_agent_policies_json='{"server-01":["bash"]}')
+    with pytest.raises(HTTPException) as exc_info:
+        enforce_pty_policy("server-01", ["/bin/bash"], settings)
+    assert "bare executable name" in str(exc_info.value.detail)
 
 
 def test_command_session_id_validation() -> None:

@@ -12,5 +12,7 @@ Mutation approval is deliberately separate from MCP authentication and the norma
 - Process mutation binds PID plus process creation time to prevent PID-reuse confusion.
 - Process termination does not escalate to hard kill.
 - Service mutation accepts only `start`, `stop`, or `restart` on a validated unit name and never invokes a shell or sudo.
+- PTY start binds the complete canonical argv hash and additionally requires separate Gateway and Agent PTY allowlists.
+- PTY input and output content are not persisted in audit records; input mutations record byte counts only.
 - Generic `execute` cannot be configured to run arbitrary interpreters or service/process mutation tools; only fixed safe command profiles are available.
 - Pending approvals are memory-only in this MVP and are invalidated by a Gateway restart.

@@ -76,6 +76,25 @@ def test_git_capability_requires_allowed_root(monkeypatch) -> None:
     assert "filesystem.discovery" not in result
 
 
+def test_pty_capability_requires_dedicated_allowlist_and_posix(monkeypatch) -> None:
+    monkeypatch.setattr(capabilities.os, "name", "posix")
+    monkeypatch.setattr(
+        capabilities,
+        "resolve_pty_executable",
+        lambda name, search_path=None: f"/usr/bin/{name}",
+    )
+    monkeypatch.setattr(capabilities.shutil, "which", lambda *args, **kwargs: None)
+    monkeypatch.setattr(capabilities, "resolve_generic_executable", lambda *args, **kwargs: None)
+
+    disabled = capabilities.detect_capabilities(make_settings(), [])
+    enabled = capabilities.detect_capabilities(
+        make_settings(pty_allowed_executables="bash"), []
+    )
+
+    assert "command.pty" not in disabled
+    assert "command.pty" in enabled
+
+
 def test_agent_hello_remains_backward_compatible_without_capabilities() -> None:
     hello = AgentHello.model_validate(
         {

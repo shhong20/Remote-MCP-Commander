@@ -563,3 +563,130 @@ class CommandSessionOutputBody(BaseModel):
     stdout_offset: int = Field(default=0, ge=0)
     stderr_offset: int = Field(default=0, ge=0)
     max_chars: int = Field(default=8192, ge=1, le=65_536)
+
+
+class PtySessionStartRequest(BaseModel):
+    type: Literal["pty_session_start_request"] = "pty_session_start_request"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    argv: list[CommandArg] = Field(min_length=1, max_length=64)
+    columns: int = Field(default=80, ge=20, le=500)
+    rows: int = Field(default=24, ge=5, le=200)
+
+
+class PtySessionStatusRequest(BaseModel):
+    type: Literal["pty_session_status_request"] = "pty_session_status_request"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+
+
+class PtySessionInputRequest(BaseModel):
+    type: Literal["pty_session_input_request"] = "pty_session_input_request"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    data: str = Field(min_length=1, max_length=65_536)
+
+
+class PtySessionResizeRequest(BaseModel):
+    type: Literal["pty_session_resize_request"] = "pty_session_resize_request"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    columns: int = Field(ge=20, le=500)
+    rows: int = Field(ge=5, le=200)
+
+
+class PtySessionCancelRequest(BaseModel):
+    type: Literal["pty_session_cancel_request"] = "pty_session_cancel_request"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+
+
+class PtySessionOutputRequest(BaseModel):
+    type: Literal["pty_session_output_request"] = "pty_session_output_request"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    offset: int = Field(default=0, ge=0)
+    max_chars: int = Field(default=8192, ge=1, le=65_536)
+
+
+class PtySessionDiscardRequest(BaseModel):
+    type: Literal["pty_session_discard_request"] = "pty_session_discard_request"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+
+
+class PtySessionSnapshot(BaseModel):
+    type: Literal["pty_session_snapshot"] = "pty_session_snapshot"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    executable: str = ""
+    state: CommandSessionState
+    columns: int = 80
+    rows: int = 24
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    returncode: int | None = None
+    output: str = ""
+    output_truncated: bool = False
+    rejected: bool = False
+    error: str | None = None
+
+
+class PtySessionOutput(BaseModel):
+    type: Literal["pty_session_output"] = "pty_session_output"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    state: CommandSessionState
+    output: str = ""
+    next_offset: int = 0
+    output_truncated: bool = False
+    rejected: bool = False
+    error: str | None = None
+
+
+class PtySessionInputResult(BaseModel):
+    type: Literal["pty_session_input_result"] = "pty_session_input_result"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    accepted_bytes: int = 0
+    rejected: bool = False
+    error: str | None = None
+
+
+class PtySessionResizeResult(BaseModel):
+    type: Literal["pty_session_resize_result"] = "pty_session_resize_result"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    columns: int = 80
+    rows: int = 24
+    rejected: bool = False
+    error: str | None = None
+
+
+class PtySessionDiscardResult(BaseModel):
+    type: Literal["pty_session_discard_result"] = "pty_session_discard_result"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    discarded: bool = False
+    rejected: bool = False
+    error: str | None = None
+
+
+class PtySessionStartBody(ApprovalUse):
+    argv: list[CommandArg] = Field(min_length=1, max_length=64)
+    columns: int = Field(default=80, ge=20, le=500)
+    rows: int = Field(default=24, ge=5, le=200)
+
+
+class PtySessionInputBody(BaseModel):
+    data: str = Field(min_length=1, max_length=65_536)
+
+
+class PtySessionResizeBody(BaseModel):
+    columns: int = Field(ge=20, le=500)
+    rows: int = Field(ge=5, le=200)
+
+
+class PtySessionOutputBody(BaseModel):
+    offset: int = Field(default=0, ge=0)
+    max_chars: int = Field(default=8192, ge=1, le=65_536)

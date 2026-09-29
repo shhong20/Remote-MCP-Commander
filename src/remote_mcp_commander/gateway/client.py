@@ -22,6 +22,11 @@ from remote_mcp_commander.protocol import (
     PortLookupResult,
     ProcessListResult,
     ProcessTerminateResult,
+    PtySessionDiscardResult,
+    PtySessionInputResult,
+    PtySessionOutput,
+    PtySessionResizeResult,
+    PtySessionSnapshot,
     ServiceActionResult,
     ServiceLogsResult,
     ServiceStatusResult,
@@ -188,6 +193,88 @@ class GatewayClient:
             f"/api/v1/agents/{agent_id}/commands/sessions/{session_id}/discard",
         )
         return CommandSessionDiscardResult.model_validate(payload)
+
+    async def start_pty_session(
+        self,
+        agent_id: str,
+        argv: list[str],
+        approval_id: str,
+        approval_secret: str,
+        *,
+        columns: int = 80,
+        rows: int = 24,
+    ) -> PtySessionSnapshot:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/pty/sessions",
+            json_body={
+                "argv": argv,
+                "columns": columns,
+                "rows": rows,
+                "approval_id": approval_id,
+                "approval_secret": approval_secret,
+            },
+        )
+        return PtySessionSnapshot.model_validate(payload)
+
+    async def pty_session_status(
+        self, agent_id: str, session_id: str
+    ) -> PtySessionSnapshot:
+        payload = await self._request(
+            "GET", f"/api/v1/agents/{agent_id}/pty/sessions/{session_id}"
+        )
+        return PtySessionSnapshot.model_validate(payload)
+
+    async def write_pty_input(
+        self, agent_id: str, session_id: str, data: str
+    ) -> PtySessionInputResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/pty/sessions/{session_id}/input",
+            json_body={"data": data},
+        )
+        return PtySessionInputResult.model_validate(payload)
+
+    async def resize_pty_session(
+        self, agent_id: str, session_id: str, *, columns: int, rows: int
+    ) -> PtySessionResizeResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/pty/sessions/{session_id}/resize",
+            json_body={"columns": columns, "rows": rows},
+        )
+        return PtySessionResizeResult.model_validate(payload)
+
+    async def pty_session_output(
+        self,
+        agent_id: str,
+        session_id: str,
+        *,
+        offset: int = 0,
+        max_chars: int = 8192,
+    ) -> PtySessionOutput:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/pty/sessions/{session_id}/output",
+            json_body={"offset": offset, "max_chars": max_chars},
+        )
+        return PtySessionOutput.model_validate(payload)
+
+    async def cancel_pty_session(
+        self, agent_id: str, session_id: str
+    ) -> PtySessionSnapshot:
+        payload = await self._request(
+            "POST", f"/api/v1/agents/{agent_id}/pty/sessions/{session_id}/cancel"
+        )
+        return PtySessionSnapshot.model_validate(payload)
+
+    async def discard_pty_session(
+        self, agent_id: str, session_id: str
+    ) -> PtySessionDiscardResult:
+        payload = await self._request(
+            "POST", f"/api/v1/agents/{agent_id}/pty/sessions/{session_id}/discard"
+        )
+        return PtySessionDiscardResult.model_validate(payload)
 
     async def list_file_roots(self, agent_id: str) -> FileRootListResult:
         payload = await self._request(
