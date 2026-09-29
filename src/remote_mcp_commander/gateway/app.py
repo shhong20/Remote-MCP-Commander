@@ -27,6 +27,12 @@ from remote_mcp_commander.protocol import (
     EnrollmentCreateBody,
     EnrollmentTicket,
     ExecuteBody,
+    FileReadBody,
+    FileReadRequest,
+    FileReadResult,
+    FileWriteBody,
+    FileWriteRequest,
+    FileWriteResult,
     PingRequest,
     PingResponse,
     PingResult,
@@ -35,7 +41,7 @@ from remote_mcp_commander.protocol import (
     RevokeResult,
 )
 
-AgentReply = CommandResult | PingResult
+AgentReply = CommandResult | PingResult | FileReadResult | FileWriteResult
 
 
 @dataclass
@@ -204,8 +210,7 @@ async def revoke_agent(agent_id: str, settings: SettingsDep) -> RevokeResult:
 @app.get("/api/v1/agents", dependencies=[Depends(require_control_token)])
 async def list_agents() -> AgentList:
     agents = [
-        agent_info(agent_id, connection)
-        for agent_id, connection in sorted(connections.items())
+        agent_info(agent_id, connection) for agent_id, connection in sorted(connections.items())
     ]
     return AgentList(agents=agents)
 
@@ -298,6 +303,64 @@ async def ping_agent(agent_id: str, settings: SettingsDep) -> PingResponse:
         connection.pending.pop(request_id, None)
 
 
+@app.post(
+    "/api/v1/agents/{agent_id}/files/read",
+    dependencies=[Depends(require_control_token)],
+)
+async def read_file(agent_id: str, body: FileReadBody, settings: SettingsDep) -> FileReadResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = FileReadRequest(request_id=request_id, **body.model_dump())
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, FileReadResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit("file_read", agent_id=agent_id, path=body.path, rejected=reply.rejected)
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent file read timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/files/write",
+    dependencies=[Depends(require_control_token)],
+)
+async def write_file(agent_id: str, body: FileWriteBody, settings: SettingsDep) -> FileWriteResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = FileWriteRequest(request_id=request_id, **body.model_dump())
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, FileWriteResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "file_write",
+            agent_id=agent_id,
+            path=body.path,
+            bytes_written=reply.bytes_written,
+            rejected=reply.rejected,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent file write timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
 @app.websocket("/ws/agent/{agent_id}")
 async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
     settings = get_settings()
@@ -344,6 +407,10 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
                 reply: AgentReply = CommandResult.model_validate(payload)
             elif message_type == "ping_result":
                 reply = PingResult.model_validate(payload)
+            elif message_type == "file_read_result":
+                reply = FileReadResult.model_validate(payload)
+            elif message_type == "file_write_result":
+                reply = FileWriteResult.model_validate(payload)
             else:
                 continue
 

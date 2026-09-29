@@ -104,3 +104,57 @@ class RegisteredDeviceList(BaseModel):
 class RevokeResult(BaseModel):
     agent_id: str
     revoked: bool
+
+
+class FileReadRequest(BaseModel):
+    type: Literal["file_read_request"] = "file_read_request"
+    request_id: str
+    path: str = Field(min_length=1, max_length=4096)
+    offset: int = Field(default=0, ge=0)
+    max_bytes: int = Field(default=65_536, ge=4, le=262_144)
+
+
+class FileReadResult(BaseModel):
+    type: Literal["file_read_result"] = "file_read_result"
+    request_id: str
+    path: str = ""
+    content: str = ""
+    size: int = 0
+    offset: int = 0
+    next_offset: int = 0
+    eof: bool = True
+    sha256: str | None = None
+    rejected: bool = False
+    error: str | None = None
+
+
+class FileWriteRequest(BaseModel):
+    type: Literal["file_write_request"] = "file_write_request"
+    request_id: str
+    path: str = Field(min_length=1, max_length=4096)
+    content: str = Field(max_length=1_048_576)
+    overwrite: bool = False
+    expected_sha256: str | None = Field(default=None, min_length=64, max_length=64)
+
+
+class FileWriteResult(BaseModel):
+    type: Literal["file_write_result"] = "file_write_result"
+    request_id: str
+    path: str = ""
+    bytes_written: int = 0
+    sha256: str | None = None
+    rejected: bool = False
+    error: str | None = None
+
+
+class FileReadBody(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+    offset: int = Field(default=0, ge=0)
+    max_bytes: int = Field(default=65_536, ge=4, le=262_144)
+
+
+class FileWriteBody(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+    content: str = Field(max_length=1_048_576)
+    overwrite: bool = False
+    expected_sha256: str | None = Field(default=None, min_length=64, max_length=64)

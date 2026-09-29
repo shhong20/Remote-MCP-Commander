@@ -9,7 +9,13 @@ from pydantic import AnyHttpUrl
 
 from remote_mcp_commander.config import Settings, get_settings
 from remote_mcp_commander.gateway.client import GatewayClient
-from remote_mcp_commander.protocol import AgentInfo, CommandResult, PingResponse
+from remote_mcp_commander.protocol import (
+    AgentInfo,
+    CommandResult,
+    FileReadResult,
+    FileWriteResult,
+    PingResponse,
+)
 
 
 class StaticTokenVerifier(TokenVerifier):
@@ -70,6 +76,32 @@ def build_mcp(settings: Settings) -> MCPServer:
     async def execute(agent_id: str, argv: list[str]) -> CommandResult:
         """Execute an argv command on a device subject to gateway and agent policies."""
         return await GatewayClient(settings).execute(agent_id, argv)
+
+    @server.tool()
+    async def read_file(
+        agent_id: str, path: str, offset: int = 0, max_bytes: int = 65_536
+    ) -> FileReadResult:
+        """Read a bounded text chunk from an absolute path inside Agent allowed roots."""
+        return await GatewayClient(settings).read_file(
+            agent_id, path, offset=offset, max_bytes=max_bytes
+        )
+
+    @server.tool()
+    async def write_file(
+        agent_id: str,
+        path: str,
+        content: str,
+        overwrite: bool = False,
+        expected_sha256: str | None = None,
+    ) -> FileWriteResult:
+        """Write text inside Agent allowed roots. Read first before overwriting an existing file."""
+        return await GatewayClient(settings).write_file(
+            agent_id,
+            path,
+            content,
+            overwrite=overwrite,
+            expected_sha256=expected_sha256,
+        )
 
     return server
 

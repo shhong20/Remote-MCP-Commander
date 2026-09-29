@@ -55,3 +55,56 @@ async def test_gateway_error_preserves_status_and_detail() -> None:
         await client.execute("server-01", ["whoami"])
     assert exc_info.value.status_code == 403
     assert exc_info.value.detail == "policy denied"
+
+
+@pytest.mark.asyncio
+async def test_file_methods_send_structured_payloads() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/files/read"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "read-1",
+                    "path": "/srv/project/a.txt",
+                    "content": "abc",
+                    "size": 3,
+                    "offset": 0,
+                    "next_offset": 3,
+                    "eof": True,
+                    "sha256": "0" * 64,
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "write-1",
+                "path": "/srv/project/a.txt",
+                "bytes_written": 3,
+                "sha256": "1" * 64,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    read_result = await client.read_file("server-01", "/srv/project/a.txt", offset=0, max_bytes=123)
+    write_result = await client.write_file(
+        "server-01",
+        "/srv/project/a.txt",
+        "xyz",
+        overwrite=True,
+        expected_sha256="0" * 64,
+    )
+
+    assert read_result.content == "abc"
+    assert write_result.bytes_written == 3
+    assert len(requests) == 2
+    assert requests[0].url.path.endswith("/files/read")
+    assert requests[1].url.path.endswith("/files/write")
+    read_payload = requests[0].content.decode("utf-8")
+    write_payload = requests[1].content.decode("utf-8")
+    assert '"max_bytes":123' in read_payload
+    assert '"content":"xyz"' in write_payload
+    assert '"overwrite":true' in write_payload
+    assert '"expected_sha256":"' + ("0" * 64) + '"' in write_payload
