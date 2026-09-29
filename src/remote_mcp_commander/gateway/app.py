@@ -46,6 +46,11 @@ from remote_mcp_commander.protocol import (
     CommandRequest,
     CommandResult,
     CommandSessionCancelRequest,
+    CommandSessionDiscardRequest,
+    CommandSessionDiscardResult,
+    CommandSessionOutput,
+    CommandSessionOutputBody,
+    CommandSessionOutputRequest,
     CommandSessionSnapshot,
     CommandSessionStartBody,
     CommandSessionStartRequest,
@@ -91,6 +96,8 @@ AgentReply = (
     | ProcessTerminateResult
     | ServiceActionResult
     | CommandSessionSnapshot
+    | CommandSessionOutput
+    | CommandSessionDiscardResult
 )
 
 
@@ -549,6 +556,78 @@ async def cancel_command_session(
 
 
 @app.post(
+    "/api/v1/agents/{agent_id}/commands/sessions/{session_id}/output",
+    dependencies=[Depends(require_control_token)],
+)
+async def get_command_session_output(
+    agent_id: str,
+    session_id: str,
+    body: CommandSessionOutputBody,
+    settings: SettingsDep,
+) -> CommandSessionOutput:
+    validate_command_session_id(session_id)
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = CommandSessionOutputRequest(
+            request_id=request_id,
+            session_id=session_id,
+            **body.model_dump(),
+        )
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, CommandSessionOutput):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent session output timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/commands/sessions/{session_id}/discard",
+    dependencies=[Depends(require_control_token)],
+)
+async def discard_command_session(
+    agent_id: str,
+    session_id: str,
+    settings: SettingsDep,
+) -> CommandSessionDiscardResult:
+    validate_command_session_id(session_id)
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = CommandSessionDiscardRequest(request_id=request_id, session_id=session_id)
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, CommandSessionDiscardResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "command_session_discarded",
+            agent_id=agent_id,
+            session_id=session_id,
+            discarded=reply.discarded,
+            rejected=reply.rejected,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent session discard timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
     "/api/v1/agents/{agent_id}/ping",
     dependencies=[Depends(require_control_token)],
 )
@@ -866,6 +945,10 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
                 reply: AgentReply = CommandResult.model_validate(payload)
             elif message_type == "command_session_snapshot":
                 reply = CommandSessionSnapshot.model_validate(payload)
+            elif message_type == "command_session_output":
+                reply = CommandSessionOutput.model_validate(payload)
+            elif message_type == "command_session_discard_result":
+                reply = CommandSessionDiscardResult.model_validate(payload)
             elif message_type == "ping_result":
                 reply = PingResult.model_validate(payload)
             elif message_type == "file_read_result":

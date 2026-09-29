@@ -12,6 +12,8 @@ from remote_mcp_commander.gateway.client import GatewayClient
 from remote_mcp_commander.protocol import (
     AgentInfo,
     CommandResult,
+    CommandSessionDiscardResult,
+    CommandSessionOutput,
     CommandSessionSnapshot,
     FileReadResult,
     FileWriteResult,
@@ -98,6 +100,28 @@ def build_mcp(settings: Settings) -> MCPServer:
     async def cancel_command(agent_id: str, session_id: str) -> CommandSessionSnapshot:
         """Cancel a running command session owned by the current Agent connection."""
         return await GatewayClient(settings).cancel_command_session(agent_id, session_id)
+
+    @server.tool()
+    async def command_output(
+        agent_id: str,
+        session_id: str,
+        stdout_offset: int = 0,
+        stderr_offset: int = 0,
+        max_chars: int = 8192,
+    ) -> CommandSessionOutput:
+        """Read only new bounded output from a command session using character cursors."""
+        return await GatewayClient(settings).command_session_output(
+            agent_id,
+            session_id,
+            stdout_offset=stdout_offset,
+            stderr_offset=stderr_offset,
+            max_chars=max_chars,
+        )
+
+    @server.tool()
+    async def discard_command(agent_id: str, session_id: str) -> CommandSessionDiscardResult:
+        """Discard a completed command session from Agent history."""
+        return await GatewayClient(settings).discard_command_session(agent_id, session_id)
 
     @server.tool()
     async def read_file(

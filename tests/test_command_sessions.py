@@ -123,3 +123,81 @@ async def test_command_session_rejects_non_generic_profile(tmp_path: Path) -> No
     result = await manager.start("start", "2" * 32, ["python"])
     assert result.rejected is True
     assert "no safe generic profile" in (result.error or "")
+
+
+@pytest.mark.asyncio
+async def test_command_output_streams_incrementally_with_character_cursors(tmp_path: Path) -> None:
+    import asyncio
+
+    make_fake_uptime(
+        tmp_path,
+        "import time\nprint('가', flush=True)\ntime.sleep(0.2)\nprint('나', flush=True)\n",
+    )
+    manager = make_manager(timeout_s=2.0, exec_search_path=str(tmp_path))
+    session_id = "3" * 32
+    await manager.start("start", session_id, ["uptime"])
+
+    first = None
+    for _ in range(100):
+        candidate = await manager.output(
+            "out-1", session_id, stdout_offset=0, stderr_offset=0, max_chars=1
+        )
+        if candidate.stdout:
+            first = candidate
+            break
+        await asyncio.sleep(0.01)
+    assert first is not None
+    assert first.stdout == "가"
+    assert first.next_stdout_offset == 1
+
+    terminal = await wait_terminal(manager, session_id)
+    assert terminal.state == "completed"
+    rest = await manager.output(
+        "out-2",
+        session_id,
+        stdout_offset=first.next_stdout_offset,
+        stderr_offset=0,
+        max_chars=32,
+    )
+    assert "나" in rest.stdout
+    assert rest.next_stdout_offset > first.next_stdout_offset
+
+
+@pytest.mark.asyncio
+async def test_command_output_marks_retention_truncation(tmp_path: Path) -> None:
+    make_fake_uptime(tmp_path, "print('abcdefghij')\n")
+    manager = make_manager(max_output_bytes=5, exec_search_path=str(tmp_path))
+    session_id = "4" * 32
+    await manager.start("start", session_id, ["uptime"])
+
+    result = await wait_terminal(manager, session_id)
+    assert result.stdout == "abcde"
+    assert result.stdout_truncated is True
+
+    output = await manager.output("out", session_id, stdout_offset=0, stderr_offset=0, max_chars=32)
+    assert output.stdout == "abcde"
+    assert output.stdout_truncated is True
+
+
+@pytest.mark.asyncio
+async def test_completed_session_can_be_discarded_but_running_session_cannot(
+    tmp_path: Path,
+) -> None:
+    make_fake_uptime(tmp_path, "print('done')\n")
+    manager = make_manager(exec_search_path=str(tmp_path))
+    completed_id = "5" * 32
+    await manager.start("start", completed_id, ["uptime"])
+    await wait_terminal(manager, completed_id)
+
+    discarded = await manager.discard("discard", completed_id)
+    assert discarded.discarded is True
+    missing = await manager.status("status", completed_id)
+    assert missing.rejected is True
+
+    make_fake_uptime(tmp_path, "import time\ntime.sleep(30)\n")
+    running_id = "6" * 32
+    await manager.start("start-running", running_id, ["uptime"])
+    rejected = await manager.discard("discard-running", running_id)
+    assert rejected.rejected is True
+    assert rejected.error == "running session cannot be discarded"
+    await manager.cancel_all()

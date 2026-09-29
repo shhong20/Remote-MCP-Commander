@@ -315,6 +315,21 @@ class CommandSessionCancelRequest(BaseModel):
     session_id: str = Field(pattern=SESSION_ID_PATTERN)
 
 
+class CommandSessionOutputRequest(BaseModel):
+    type: Literal["command_session_output_request"] = "command_session_output_request"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    stdout_offset: int = Field(default=0, ge=0)
+    stderr_offset: int = Field(default=0, ge=0)
+    max_chars: int = Field(default=8192, ge=1, le=65_536)
+
+
+class CommandSessionDiscardRequest(BaseModel):
+    type: Literal["command_session_discard_request"] = "command_session_discard_request"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+
+
 class CommandSessionSnapshot(BaseModel):
     type: Literal["command_session_snapshot"] = "command_session_snapshot"
     request_id: str
@@ -326,9 +341,41 @@ class CommandSessionSnapshot(BaseModel):
     returncode: int | None = None
     stdout: str = ""
     stderr: str = ""
+    stdout_truncated: bool = False
+    stderr_truncated: bool = False
+    rejected: bool = False
+    error: str | None = None
+
+
+class CommandSessionOutput(BaseModel):
+    type: Literal["command_session_output"] = "command_session_output"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    state: CommandSessionState
+    stdout: str = ""
+    stderr: str = ""
+    next_stdout_offset: int = 0
+    next_stderr_offset: int = 0
+    stdout_truncated: bool = False
+    stderr_truncated: bool = False
+    rejected: bool = False
+    error: str | None = None
+
+
+class CommandSessionDiscardResult(BaseModel):
+    type: Literal["command_session_discard_result"] = "command_session_discard_result"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    discarded: bool = False
     rejected: bool = False
     error: str | None = None
 
 
 class CommandSessionStartBody(BaseModel):
     argv: list[CommandArg] = Field(min_length=1, max_length=64)
+
+
+class CommandSessionOutputBody(BaseModel):
+    stdout_offset: int = Field(default=0, ge=0)
+    stderr_offset: int = Field(default=0, ge=0)
+    max_chars: int = Field(default=8192, ge=1, le=65_536)
