@@ -40,12 +40,24 @@ def test_mcp_gateway_rejects_remote_plaintext_http() -> None:
 def test_remote_mcp_http_requires_https_metadata_urls() -> None:
     settings = make_settings(
         mcp_transport="streamable-http",
-        mcp_host="0.0.0.0",
+        mcp_host="127.0.0.1",
         mcp_token="mcp-credential-value",
         mcp_resource_url="http://gateway.example.test/mcp",
         mcp_issuer_url="http://gateway.example.test",
     )
     with pytest.raises(ValueError, match="https"):
+        settings.validate_mcp_http_security()
+
+
+def test_mcp_streamable_http_rejects_non_loopback_bind() -> None:
+    settings = make_settings(
+        mcp_transport="streamable-http",
+        mcp_host="0.0.0.0",
+        mcp_token="mcp-credential-value",
+        mcp_resource_url="https://mcp.example.test/mcp",
+        mcp_issuer_url="https://mcp.example.test",
+    )
+    with pytest.raises(ValueError, match="must bind to loopback"):
         settings.validate_mcp_http_security()
 
 

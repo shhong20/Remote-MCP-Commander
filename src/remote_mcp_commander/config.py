@@ -170,8 +170,11 @@ class Settings(BaseSettings):
         if self._credential_is_unsafe(self.mcp_token):
             raise ValueError("set a non-placeholder COMMANDER_MCP_TOKEN for Streamable HTTP")
         if self.mcp_host not in {"127.0.0.1", "localhost", "::1"}:
-            self._require_secure_remote_url(self.mcp_resource_url, "https", "http")
-            self._require_secure_remote_url(self.mcp_issuer_url, "https", "http")
+            raise ValueError(
+                "MCP Streamable HTTP must bind to loopback; terminate TLS at a reverse proxy"
+            )
+        self._require_secure_remote_url(self.mcp_resource_url, "https", "http")
+        self._require_secure_remote_url(self.mcp_issuer_url, "https", "http")
 
 
 @lru_cache

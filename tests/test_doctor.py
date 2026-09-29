@@ -134,7 +134,7 @@ def test_agent_doctor_warns_when_filesystem_roots_are_disabled() -> None:
     assert "filesystem and Git tools stay disabled" in roots.detail
 
 
-def test_mcp_doctor_allows_public_bind_as_warning_with_https_metadata(capsys) -> None:
+def test_mcp_doctor_rejects_public_plain_http_bind(capsys) -> None:
     settings = Settings(
         control_token="control-placeholder-value",
         gateway_http="http://127.0.0.1:8765",
@@ -147,6 +147,6 @@ def test_mcp_doctor_allows_public_bind_as_warning_with_https_metadata(capsys) ->
 
     exit_code = main(["mcp", "--json"], settings=settings)
     payload = json.loads(capsys.readouterr().out)
-    assert exit_code == 0
-    assert payload["warnings"] == 1
-    assert payload["ok"] is True
+    assert exit_code == 1
+    assert payload["ok"] is False
+    assert payload["failures"] >= 1
