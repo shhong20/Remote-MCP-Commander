@@ -120,3 +120,7 @@ Package, runtime, and release signing use distinct keys and trust directories. S
 ## Artifact registry
 
 Publish a verified package/runtime pair with `remote-mcp-artifact publish` and pin the returned artifact ID in deployment automation. Keep both trust directories outside the registry and run `remote-mcp-artifact verify` on the deployment host before constructing a release. See `artifact-registry.md`.
+
+## Checked activation
+
+After bootstrap, use `remote-mcp-release activate-checked` for the fixed Gateway/MCP native stack. The command restarts only the two packaged system units, verifies both unit states plus the loopback Gateway health endpoint, and automatically restores the previous trusted release on failure. See `health-rollback.md`.

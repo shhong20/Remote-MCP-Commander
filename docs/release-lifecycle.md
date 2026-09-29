@@ -13,7 +13,7 @@ Production services reference a stable `current` path while immutable release co
 
 Prepare release directories outside the release manager. Each candidate must be a real direct child directory, contain an executable `.venv/bin/remote-mcp-doctor`, and contain no `.git` metadata. Runtime state, credentials, registry data, and audit data stay outside release directories.
 
-The release CLI never downloads code, installs packages, restarts services, or executes arbitrary release scripts.
+The release CLI never downloads code, installs packages, or executes arbitrary release scripts. Ordinary `activate` and `rollback` only change links. The explicit `activate-checked` command may restart the two fixed native systemd units; it accepts no arbitrary command, unit, or URL.
 
 ## Commands
 
@@ -26,6 +26,8 @@ remote-mcp-release --root /opt/remote-mcp-commander \
   sign 2026.09.29-b --key-id ops-2026 --private-key /secure/release-signing-private.pem
 remote-mcp-release --root /opt/remote-mcp-commander verify 2026.09.29-b
 remote-mcp-release --root /opt/remote-mcp-commander activate 2026.09.29-b
+remote-mcp-release --root /opt/remote-mcp-commander \
+  activate-checked 2026.09.29-b --timeout-seconds 30 --interval-seconds 0.5
 remote-mcp-release --root /opt/remote-mcp-commander rollback
 ```
 
@@ -41,14 +43,18 @@ remote-mcp-release --root /opt/remote-mcp-commander rollback
 - a lock file serializes concurrent activate/rollback operations on POSIX
 - each individual symlink switch uses temporary-link + `os.replace` atomic replacement
 - activation is idempotent if the requested release is already current
+- checked activation requires a different, already trusted current release as its rollback target
+- checked activation holds the release lock through restart, health polling, and recovery
 
 The two links are not a filesystem transaction as a pair. Activation verifies the target before updating links. Rollback verifies `previous` before switching `current` back.
 
 ## Operational sequence
 
-Seal, sign, and verify the candidate, then activate it. After `activate`, restart the intended service normally. Its existing systemd `ExecStartPre=remote-mcp-doctor <role>` validates the selected release environment before the process starts.
+Seal, sign, and verify the candidate, then activate it. For the native Gateway/MCP stack, `activate-checked` switches the links, restarts both fixed units, and polls bounded health. If candidate health fails, it restores and restarts the previous trusted release. See `health-rollback.md`.
 
-If startup or smoke checks fail:
+For bootstrap or another topology, ordinary `activate` changes links only. Restart the intended service through external orchestration; its systemd `ExecStartPre=remote-mcp-doctor <role>` validates the selected release environment before the process starts.
+
+If startup or custom smoke checks outside `activate-checked` fail:
 
 ```bash
 remote-mcp-release --root /opt/remote-mcp-commander verify <previous-id>
