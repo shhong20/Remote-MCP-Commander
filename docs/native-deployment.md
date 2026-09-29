@@ -28,6 +28,7 @@ Suggested paths:
 /opt/remote-mcp-commander/current -> releases/<id>
 /opt/remote-mcp-commander/trusted-release-keys/  root-managed Ed25519 public keys
 /etc/remote-mcp-commander/trusted-package-keys/ package-publication Ed25519 public keys
+/etc/remote-mcp-commander/trusted-runtime-keys/ runtime-publication Ed25519 public keys
 /etc/remote-mcp-commander/gateway.env    Gateway secrets/config, mode 0600
 /etc/remote-mcp-commander/mcp.env        MCP secrets/config, mode 0600
 /var/lib/remote-mcp-commander/           registry and audit journal
@@ -111,4 +112,6 @@ Before a package bundle is used to prepare a host release, run `remote-mcp-packa
 
 ## Runtime wheel inputs
 
-Before constructing a deployment virtual environment, generate or verify a `remote-mcp-runtime` bundle for the trusted package. The runtime lock fixes the CPython/Linux target, exact pip resolver, and every dependency wheel hash, then re-resolves the closure offline. See `runtime-input-locks.md`.
+Before constructing a deployment virtual environment, generate a `remote-mcp-runtime` bundle for the trusted package, sign it with the separate runtime-publication key, and accept it on the host with `verify-trusted`. The runtime lock fixes the CPython/Linux target, exact pip resolver, and every dependency wheel hash, then re-resolves the closure offline.
+
+Package, runtime, and release signing use distinct keys and trust directories. See `runtime-input-locks.md` and `runtime-publication.md`.

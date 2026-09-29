@@ -45,8 +45,8 @@ Verification performs a fully offline `pip install --dry-run --ignore-installed 
 
 ## Trust boundary
 
-This stage locks and validates dependency inputs; `runtime-lock.json` is not yet a publication authenticity anchor. A party able to replace both the lock and every dependency wheel could create a different but internally consistent closure.
+This stage locks and validates dependency inputs. Use the separate runtime publication layer to authenticate the exact lock before a deployment host accepts the wheelhouse.
 
-The next trust layer should sign the exact runtime lock with a dedicated domain-separated publication signature before a host accepts the wheelhouse. Until that layer is present, treat runtime bundles as build-pipeline outputs rather than independently trusted deployment artifacts.
+See `runtime-publication.md` for the domain-separated Ed25519 signature, trust store, rotation, and `remote-mcp-runtime sign|verify-trusted` contract.
 
 The lock also does not claim that the final virtual-environment directory is byte-for-byte reproducible. Installation paths, generated scripts, bytecode policy, and platform/runtime details remain separate from the exact input-wheel guarantee.
