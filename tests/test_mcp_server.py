@@ -22,7 +22,14 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         result = await client.list_tools()
 
     names = {tool.name for tool in result.tools}
-    assert names == {"list_devices", "device_info", "ping_device", "execute"}
+    assert names == {
+        "list_devices",
+        "device_info",
+        "ping_device",
+        "execute",
+        "read_file",
+        "write_file",
+    }
 
 
 @pytest.mark.asyncio

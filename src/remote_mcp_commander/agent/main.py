@@ -8,10 +8,13 @@ import socket
 import websockets
 
 from remote_mcp_commander.agent.executor import execute_argv
+from remote_mcp_commander.agent.file_ops import allowed_roots, read_text_file, write_text_file
 from remote_mcp_commander.config import get_settings
 from remote_mcp_commander.protocol import (
     AgentHello,
     CommandRequest,
+    FileReadRequest,
+    FileWriteRequest,
     Heartbeat,
     PingRequest,
     PingResult,
@@ -29,6 +32,7 @@ async def agent_loop() -> None:
     token = settings.load_agent_token()
     settings.validate_agent_security(token)
     headers = {"Authorization": f"Bearer {token}"}
+    roots = allowed_roots(settings.allowed_roots)
 
     while True:
         try:
@@ -37,7 +41,7 @@ async def agent_loop() -> None:
                 additional_headers=headers,
                 ping_interval=20,
                 ping_timeout=20,
-                max_size=1_048_576,
+                max_size=2_097_152,
             ) as websocket:
                 hello = AgentHello(
                     agent_id=settings.agent_id,
@@ -45,9 +49,7 @@ async def agent_loop() -> None:
                     platform=platform.platform(),
                 )
                 await websocket.send(hello.model_dump_json())
-                heartbeat_task = asyncio.create_task(
-                    heartbeat_loop(websocket, settings.agent_id)
-                )
+                heartbeat_task = asyncio.create_task(heartbeat_loop(websocket, settings.agent_id))
                 try:
                     async for raw in websocket:
                         payload = json.loads(raw)
@@ -57,6 +59,33 @@ async def agent_loop() -> None:
                             await websocket.send(
                                 PingResult(request_id=ping.request_id).model_dump_json()
                             )
+                            continue
+
+                        if message_type == "file_read_request":
+                            request = FileReadRequest.model_validate(payload)
+                            result = await read_text_file(
+                                request.request_id,
+                                request.path,
+                                roots=roots,
+                                offset=request.offset,
+                                max_bytes=request.max_bytes,
+                                max_file_bytes=settings.file_max_bytes,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "file_write_request":
+                            request = FileWriteRequest.model_validate(payload)
+                            result = await write_text_file(
+                                request.request_id,
+                                request.path,
+                                request.content,
+                                roots=roots,
+                                overwrite=request.overwrite,
+                                expected_sha256=request.expected_sha256,
+                                max_file_bytes=settings.file_max_bytes,
+                            )
+                            await websocket.send(result.model_dump_json())
                             continue
 
                         if message_type != "command_request":

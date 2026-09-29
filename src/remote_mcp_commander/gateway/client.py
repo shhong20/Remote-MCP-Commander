@@ -9,6 +9,8 @@ from remote_mcp_commander.protocol import (
     AgentInfo,
     AgentList,
     CommandResult,
+    FileReadResult,
+    FileWriteResult,
     PingResponse,
 )
 
@@ -74,3 +76,39 @@ class GatewayClient:
             json_body={"argv": argv},
         )
         return CommandResult.model_validate(payload)
+
+    async def read_file(
+        self,
+        agent_id: str,
+        path: str,
+        *,
+        offset: int = 0,
+        max_bytes: int = 65_536,
+    ) -> FileReadResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/files/read",
+            json_body={"path": path, "offset": offset, "max_bytes": max_bytes},
+        )
+        return FileReadResult.model_validate(payload)
+
+    async def write_file(
+        self,
+        agent_id: str,
+        path: str,
+        content: str,
+        *,
+        overwrite: bool = False,
+        expected_sha256: str | None = None,
+    ) -> FileWriteResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/files/write",
+            json_body={
+                "path": path,
+                "content": content,
+                "overwrite": overwrite,
+                "expected_sha256": expected_sha256,
+            },
+        )
+        return FileWriteResult.model_validate(payload)

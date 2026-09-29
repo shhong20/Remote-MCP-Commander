@@ -31,6 +31,8 @@ class Settings(BaseSettings):
     allowed_executables: str = "echo,hostname,whoami,uptime"
     max_output_bytes: int = 65_536
     exec_timeout_s: float = 10.0
+    allowed_roots_json: str = "[]"
+    file_max_bytes: int = Field(default=1_048_576, ge=1, le=1_048_576)
 
     gateway_http: str = "http://127.0.0.1:8765"
     mcp_transport: Literal["stdio", "streamable-http"] = "stdio"
@@ -66,6 +68,13 @@ class Settings(BaseSettings):
                 raise ValueError(f"policy for {agent_id} must be a JSON array")
             policies[str(agent_id)] = {str(item) for item in executables}
         return policies
+
+    @property
+    def allowed_roots(self) -> list[str]:
+        data = json.loads(self.allowed_roots_json)
+        if not isinstance(data, list) or not all(isinstance(item, str) for item in data):
+            raise ValueError("COMMANDER_ALLOWED_ROOTS_JSON must be a JSON string array")
+        return data
 
     @property
     def registry_file(self) -> Path:
