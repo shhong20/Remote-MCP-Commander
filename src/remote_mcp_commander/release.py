@@ -15,6 +15,12 @@ from remote_mcp_commander.release_integrity import (
     seal_release,
     verify_release,
 )
+from remote_mcp_commander.release_signing import (
+    SigningError,
+    load_signature,
+    sign_release,
+    verify_signed_release,
+)
 
 try:
     import fcntl
@@ -32,6 +38,7 @@ class ReleaseStatus:
     previous: str | None
     available: list[str]
     sealed: list[str]
+    signed: list[str]
 
 
 class ReleaseError(RuntimeError):
@@ -133,6 +140,7 @@ def _release_lock(root: Path) -> Iterator[None]:
 def status(root: Path) -> ReleaseStatus:
     available = []
     sealed = []
+    signed = []
     for child in sorted((root / "releases").iterdir(), key=lambda item: item.name):
         if not RELEASE_ID_RE.fullmatch(child.name):
             continue
@@ -147,6 +155,12 @@ def status(root: Path) -> ReleaseStatus:
             pass
         else:
             sealed.append(child.name)
+            try:
+                load_signature(child)
+            except SigningError:
+                pass
+            else:
+                signed.append(child.name)
         if len(available) >= 1000:
             break
     return ReleaseStatus(
@@ -155,13 +169,20 @@ def status(root: Path) -> ReleaseStatus:
         _read_release_link(root, "previous"),
         available,
         sealed,
+        signed,
     )
 
 
-def activate(root: Path, release_id: str) -> ReleaseStatus:
+def activate(
+    root: Path,
+    release_id: str,
+    *,
+    trusted_keys_dir: Path | None = None,
+) -> ReleaseStatus:
     candidate = _release_dir(root, release_id)
+    trust = trusted_keys_dir or root / "trusted-release-keys"
     with _release_lock(root):
-        verify_release(candidate)
+        verify_signed_release(candidate, trusted_keys_dir=trust)
         current = _read_release_link(root, "current")
         if current == release_id:
             return status(root)
@@ -171,13 +192,14 @@ def activate(root: Path, release_id: str) -> ReleaseStatus:
         return status(root)
 
 
-def rollback(root: Path) -> ReleaseStatus:
+def rollback(root: Path, *, trusted_keys_dir: Path | None = None) -> ReleaseStatus:
+    trust = trusted_keys_dir or root / "trusted-release-keys"
     with _release_lock(root):
         current = _read_release_link(root, "current")
         previous = _read_release_link(root, "previous")
         if previous is None:
             raise ReleaseError("no previous release is available")
-        verify_release(_release_dir(root, previous))
+        verify_signed_release(_release_dir(root, previous), trusted_keys_dir=trust)
         _replace_link(root, "current", previous)
         if current is not None:
             _replace_link(root, "previous", current)
@@ -193,6 +215,7 @@ def _print_status(result: ReleaseStatus, *, json_output: bool) -> None:
     print(f"previous: {result.previous or '-'}")
     print("available: " + (", ".join(result.available) or "-"))
     print("sealed: " + (", ".join(result.sealed) or "-"))
+    print("signed: " + (", ".join(result.signed) or "-"))
 
 
 def _print_manifest(manifest, *, json_output: bool) -> None:
@@ -213,15 +236,43 @@ def _print_manifest(manifest, *, json_output: bool) -> None:
         print(f"{key}: {value}")
 
 
+def _print_verified(manifest, signature, *, json_output: bool) -> None:
+    payload = {
+        "release_id": manifest.release_id,
+        "package_version": manifest.package_version,
+        "commit_sha": manifest.commit_sha,
+        "protocol_min": manifest.protocol_min,
+        "protocol_max": manifest.protocol_max,
+        "tree_sha256": manifest.tree_sha256,
+        "signing_key_id": signature.key_id,
+        "manifest_sha256": signature.manifest_sha256,
+    }
+    if json_output:
+        print(json.dumps(payload, sort_keys=True))
+        return
+    for key, value in payload.items():
+        print(f"{key}: {value}")
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Manage atomic Remote MCP Commander releases")
     parser.add_argument("--root", required=True, help="absolute deployment root")
     parser.add_argument("--json", action="store_true", dest="json_output")
+    parser.add_argument(
+        "--trusted-keys-dir",
+        help="trusted Ed25519 public-key directory (default: <root>/trusted-release-keys)",
+    )
     subparsers = parser.add_subparsers(dest="action", required=True)
     subparsers.add_parser("status")
     seal_parser = subparsers.add_parser("seal")
     seal_parser.add_argument("release_id")
     seal_parser.add_argument("--commit-sha", required=True)
+    integrity_parser = subparsers.add_parser("verify-integrity")
+    integrity_parser.add_argument("release_id")
+    sign_parser = subparsers.add_parser("sign")
+    sign_parser.add_argument("release_id")
+    sign_parser.add_argument("--key-id", required=True)
+    sign_parser.add_argument("--private-key", required=True)
     verify_parser = subparsers.add_parser("verify")
     verify_parser.add_argument("release_id")
     activate_parser = subparsers.add_parser("activate")
@@ -231,21 +282,41 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         root = _validate_root(args.root)
+        trust = (
+            Path(args.trusted_keys_dir).expanduser()
+            if args.trusted_keys_dir
+            else root / "trusted-release-keys"
+        )
         if args.action == "status":
             result = status(root)
         elif args.action == "seal":
             manifest = seal_release(_release_dir(root, args.release_id), commit_sha=args.commit_sha)
             _print_manifest(manifest, json_output=args.json_output)
             return 0
-        elif args.action == "verify":
+        elif args.action == "verify-integrity":
             manifest = verify_release(_release_dir(root, args.release_id))
             _print_manifest(manifest, json_output=args.json_output)
             return 0
+        elif args.action == "sign":
+            signature = sign_release(
+                _release_dir(root, args.release_id),
+                key_id=args.key_id,
+                private_key_path=Path(args.private_key),
+            )
+            manifest = verify_release(_release_dir(root, args.release_id))
+            _print_verified(manifest, signature, json_output=args.json_output)
+            return 0
+        elif args.action == "verify":
+            manifest, signature = verify_signed_release(
+                _release_dir(root, args.release_id), trusted_keys_dir=trust
+            )
+            _print_verified(manifest, signature, json_output=args.json_output)
+            return 0
         elif args.action == "activate":
-            result = activate(root, args.release_id)
+            result = activate(root, args.release_id, trusted_keys_dir=trust)
         else:
-            result = rollback(root)
-    except (OSError, ReleaseError, IntegrityError) as exc:
+            result = rollback(root, trusted_keys_dir=trust)
+    except (OSError, ReleaseError, IntegrityError, SigningError) as exc:
         if args.json_output:
             print(json.dumps({"ok": False, "error": str(exc)}, sort_keys=True))
         else:

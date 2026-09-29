@@ -4,6 +4,8 @@ import os
 from pathlib import Path
 
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from remote_mcp_commander.release import (
     ReleaseError,
@@ -14,6 +16,7 @@ from remote_mcp_commander.release import (
     status,
 )
 from remote_mcp_commander.release_integrity import IntegrityError, seal_release
+from remote_mcp_commander.release_signing import SigningError, sign_release
 
 
 def make_release(root: Path, release_id: str) -> Path:
@@ -28,12 +31,38 @@ def make_release(root: Path, release_id: str) -> Path:
     (package / "__init__.py").write_text('__version__ = "0.16.0"\n')
     (package / "protocol.py").write_text("PROTOCOL_MIN_SUPPORTED = 1\nPROTOCOL_MAX_SUPPORTED = 1\n")
     seal_release(release, commit_sha="a" * 40)
+    root = release.parent.parent
+    sign_release(
+        release,
+        key_id="test-key",
+        private_key_path=root / "test-signing-private.pem",
+    )
     return release
 
 
 def make_root(tmp_path: Path) -> Path:
     root = tmp_path / "commander"
     (root / "releases").mkdir(parents=True)
+    private = Ed25519PrivateKey.generate()
+    private_path = root / "test-signing-private.pem"
+    private_path.write_bytes(
+        private.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    private_path.chmod(0o600)
+    trusted = root / "trusted-release-keys"
+    trusted.mkdir(mode=0o755)
+    public_path = trusted / "test-key.pem"
+    public_path.write_bytes(
+        private.public_key().public_bytes(
+            serialization.Encoding.PEM,
+            serialization.PublicFormat.SubjectPublicKeyInfo,
+        )
+    )
+    public_path.chmod(0o644)
     return root
 
 
@@ -131,6 +160,7 @@ def test_status_distinguishes_sealed_candidates(tmp_path: Path) -> None:
 
     assert result.available == ["sealed", "unsealed"]
     assert result.sealed == ["sealed"]
+    assert result.signed == ["sealed"]
 
 
 def test_cli_seal_verify_and_activate(tmp_path: Path, capsys) -> None:
@@ -148,6 +178,24 @@ def test_cli_seal_verify_and_activate(tmp_path: Path, capsys) -> None:
 
     assert main(["--root", str(root), "seal", "v1", "--commit-sha", "c" * 40]) == 0
     assert "tree_sha256:" in capsys.readouterr().out
+    assert main(["--root", str(root), "verify-integrity", "v1"]) == 0
+    capsys.readouterr()
+    assert (
+        main(
+            [
+                "--root",
+                str(root),
+                "sign",
+                "v1",
+                "--key-id",
+                "test-key",
+                "--private-key",
+                str(root / "test-signing-private.pem"),
+            ]
+        )
+        == 0
+    )
+    capsys.readouterr()
     assert main(["--root", str(root), "verify", "v1"]) == 0
     capsys.readouterr()
     assert main(["--root", str(root), "activate", "v1"]) == 0
@@ -175,5 +223,23 @@ def test_activate_rejects_unsealed_release(tmp_path: Path) -> None:
     doctor.write_text("#!/bin/sh\nexit 0\n")
     doctor.chmod(0o755)
 
-    with pytest.raises(IntegrityError, match="manifest"):
+    with pytest.raises(SigningError, match="signature"):
         activate(root, "legacy")
+
+
+def test_activate_rejects_sealed_but_unsigned_release(tmp_path: Path) -> None:
+    root = make_root(tmp_path)
+    release = root / "releases" / "unsigned"
+    doctor = release / ".venv" / "bin" / "remote-mcp-doctor"
+    doctor.parent.mkdir(parents=True)
+    doctor.write_text("#!/bin/sh\nexit 0\n")
+    doctor.chmod(0o755)
+    (release / "pyproject.toml").write_text('[project]\nname="test-release"\nversion="0.18.0"\n')
+    package = release / "src" / "remote_mcp_commander"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text('__version__ = "0.18.0"\n')
+    (package / "protocol.py").write_text("PROTOCOL_MIN_SUPPORTED = 1\nPROTOCOL_MAX_SUPPORTED = 1\n")
+    seal_release(release, commit_sha="e" * 40)
+
+    with pytest.raises(SigningError, match="signature"):
+        activate(root, "unsigned")
