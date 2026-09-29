@@ -8,8 +8,10 @@ import socket
 import websockets
 
 from remote_mcp_commander import __version__
+from remote_mcp_commander.agent.diagnostics import lookup_port, service_logs, system_health
 from remote_mcp_commander.agent.executor import execute_argv
 from remote_mcp_commander.agent.file_ops import allowed_roots, read_text_file, write_text_file
+from remote_mcp_commander.agent.git_ops import git_status
 from remote_mcp_commander.agent.session_ops import CommandSessionManager
 from remote_mcp_commander.agent.system_ops import (
     list_processes,
@@ -28,13 +30,17 @@ from remote_mcp_commander.protocol import (
     CommandSessionStatusRequest,
     FileReadRequest,
     FileWriteRequest,
+    GitStatusRequest,
     Heartbeat,
     PingRequest,
     PingResult,
+    PortLookupRequest,
     ProcessListRequest,
     ProcessTerminateRequest,
     ServiceActionRequest,
+    ServiceLogsRequest,
     ServiceStatusRequest,
+    SystemHealthRequest,
 )
 
 
@@ -84,6 +90,42 @@ async def agent_loop() -> None:
                             await websocket.send(
                                 PingResult(request_id=ping.request_id).model_dump_json()
                             )
+                            continue
+
+                        if message_type == "system_health_request":
+                            request = SystemHealthRequest.model_validate(payload)
+                            result = await system_health(request.request_id)
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "port_lookup_request":
+                            request = PortLookupRequest.model_validate(payload)
+                            result = await lookup_port(request.request_id, request.port)
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "service_logs_request":
+                            request = ServiceLogsRequest.model_validate(payload)
+                            result = await service_logs(
+                                request.request_id,
+                                request.unit,
+                                request.lines,
+                                timeout_s=settings.exec_timeout_s,
+                                max_output_bytes=settings.max_output_bytes,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "git_status_request":
+                            request = GitStatusRequest.model_validate(payload)
+                            result = await git_status(
+                                request.request_id,
+                                request.path,
+                                roots=roots,
+                                timeout_s=settings.exec_timeout_s,
+                                max_output_bytes=settings.max_output_bytes,
+                            )
+                            await websocket.send(result.model_dump_json())
                             continue
 
                         if message_type == "command_session_start_request":

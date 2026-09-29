@@ -229,3 +229,49 @@ async def test_command_session_methods_use_expected_routes() -> None:
     assert b'"argv":["uptime"]' in requests[0].content
     assert b'"stdout_offset":3' in requests[3].content
     assert b'"max_chars":4' in requests[3].content
+
+
+@pytest.mark.asyncio
+async def test_diagnostic_methods_use_expected_routes_and_payloads() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        path = request.url.path
+        if path.endswith("/health"):
+            return httpx.Response(200, json={"request_id": "health", "uptime_seconds": 10})
+        if path.endswith("/port"):
+            return httpx.Response(200, json={"request_id": "port", "port": 8005})
+        if path.endswith("/service-logs"):
+            return httpx.Response(
+                200,
+                json={"request_id": "logs", "unit": "demo.service", "text": "ok"},
+            )
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "git",
+                "path": "/srv/repo",
+                "repo_root": "/srv/repo",
+                "clean": True,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    health = await client.system_health("server-01")
+    port = await client.lookup_port("server-01", 8005)
+    logs = await client.service_logs("server-01", "demo.service", lines=25)
+    git = await client.git_status("server-01", "/srv/repo")
+
+    assert health.uptime_seconds == 10
+    assert port.port == 8005
+    assert logs.text == "ok"
+    assert git.clean is True
+    assert requests[0].url.path.endswith("/diagnostics/health")
+    assert requests[1].url.path.endswith("/diagnostics/port")
+    assert requests[2].url.path.endswith("/diagnostics/service-logs")
+    assert requests[3].url.path.endswith("/diagnostics/git-status")
+    assert b'"port":8005' in requests[1].content
+    assert b'"unit":"demo.service"' in requests[2].content
+    assert b'"lines":25' in requests[2].content
+    assert b'"path":"/srv/repo"' in requests[3].content

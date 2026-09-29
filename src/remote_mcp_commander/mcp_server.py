@@ -17,12 +17,16 @@ from remote_mcp_commander.protocol import (
     CommandSessionSnapshot,
     FileReadResult,
     FileWriteResult,
+    GitStatusResult,
     PingResponse,
+    PortLookupResult,
     ProcessListResult,
     ProcessTerminateResult,
     ServiceAction,
     ServiceActionResult,
+    ServiceLogsResult,
     ServiceStatusResult,
+    SystemHealthResult,
 )
 
 
@@ -80,6 +84,26 @@ def build_mcp(settings: Settings) -> MCPServer:
     async def ping_device(agent_id: str) -> PingResponse:
         """Measure an actual gateway-to-agent round trip for a connected device."""
         return await GatewayClient(settings).ping_device(agent_id)
+
+    @server.tool()
+    async def system_health(agent_id: str) -> SystemHealthResult:
+        """Read bounded CPU, memory, load, uptime, swap, and root-disk health metrics."""
+        return await GatewayClient(settings).system_health(agent_id)
+
+    @server.tool()
+    async def lookup_port(agent_id: str, port: int) -> PortLookupResult:
+        """Find listening processes for one TCP port without exposing command lines."""
+        return await GatewayClient(settings).lookup_port(agent_id, port)
+
+    @server.tool()
+    async def service_logs(agent_id: str, unit: str, lines: int = 100) -> ServiceLogsResult:
+        """Read bounded recent journal entries for one validated systemd unit."""
+        return await GatewayClient(settings).service_logs(agent_id, unit, lines=lines)
+
+    @server.tool()
+    async def git_status(agent_id: str, path: str) -> GitStatusResult:
+        """Read bounded porcelain-v2 status for a normal Git repo inside Agent allowed roots."""
+        return await GatewayClient(settings).git_status(agent_id, path)
 
     @server.tool()
     async def execute(agent_id: str, argv: list[str]) -> CommandResult:

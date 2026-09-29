@@ -14,11 +14,15 @@ from remote_mcp_commander.protocol import (
     CommandSessionSnapshot,
     FileReadResult,
     FileWriteResult,
+    GitStatusResult,
     PingResponse,
+    PortLookupResult,
     ProcessListResult,
     ProcessTerminateResult,
     ServiceActionResult,
+    ServiceLogsResult,
     ServiceStatusResult,
+    SystemHealthResult,
 )
 
 
@@ -75,6 +79,39 @@ class GatewayClient:
     async def ping_device(self, agent_id: str) -> PingResponse:
         payload = await self._request("POST", f"/api/v1/agents/{agent_id}/ping")
         return PingResponse.model_validate(payload)
+
+    async def system_health(self, agent_id: str) -> SystemHealthResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/diagnostics/health",
+        )
+        return SystemHealthResult.model_validate(payload)
+
+    async def lookup_port(self, agent_id: str, port: int) -> PortLookupResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/diagnostics/port",
+            json_body={"port": port},
+        )
+        return PortLookupResult.model_validate(payload)
+
+    async def service_logs(
+        self, agent_id: str, unit: str, *, lines: int = 100
+    ) -> ServiceLogsResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/diagnostics/service-logs",
+            json_body={"unit": unit, "lines": lines},
+        )
+        return ServiceLogsResult.model_validate(payload)
+
+    async def git_status(self, agent_id: str, path: str) -> GitStatusResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/diagnostics/git-status",
+            json_body={"path": path},
+        )
+        return GitStatusResult.model_validate(payload)
 
     async def execute(self, agent_id: str, argv: list[str]) -> CommandResult:
         payload = await self._request(

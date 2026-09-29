@@ -93,6 +93,10 @@ The current MCP tools are intentionally narrow:
 - `list_devices()` - connected devices and metadata
 - `device_info(agent_id)` - one device
 - `ping_device(agent_id)` - real Gateway/Agent round-trip latency
+- `system_health(agent_id)` - bounded CPU, memory, load, uptime, swap, and root-disk metrics
+- `lookup_port(agent_id, port)` - find bounded TCP listeners without exposing process command lines
+- `service_logs(agent_id, unit, lines)` - bounded recent journal entries for one validated systemd unit
+- `git_status(agent_id, path)` - bounded porcelain-v2 status for a normal Git repo inside allowed roots
 - `execute(agent_id, argv)` - structured argv execution under fixed safe profiles
 - `start_command(agent_id, argv)` - start a connection-scoped cancellable safe-profile command session
 - `command_status(agent_id, session_id)` - read current session state and retained bounded output
@@ -107,6 +111,8 @@ The current MCP tools are intentionally narrow:
 - `service_action(...)` - approval-gated `start`, `stop`, or `restart` for one exact systemd unit
 
 `execute` never accepts a shell command string. It is also limited to fixed safe generic profiles: `echo`, argument-free `hostname`, `whoami`, and `uptime`. Generic execution accepts bare executable names only, resolves them from the fixed trusted search path `/usr/bin:/bin`, and gives the child the same restricted `PATH`. Adding `systemctl`, a shell/interpreter, another executable, or an absolute-path alias to configuration therefore does not bypass the mutation approval path. Gateway policy and Agent policy must both allow the executable.
+
+Read-only diagnostics do not widen generic execution. Port lookup uses psutil without returning process command lines or environments. Service logs call a fixed trusted-path `journalctl` argv with validated unit names and bounded lines/output. Git status is restricted to normal `.git/` directory repositories fully inside configured allowed roots; gitfile/worktree and symlink metadata are rejected, and fsmonitor/hooks/global configuration/pagers are disabled for the fixed status command. See `docs/read-only-diagnostics.md`.
 
 Command sessions use the exact same generic policy. They persist across MCP calls while the Agent WebSocket connection is alive, incrementally drain bounded stdout/stderr, support cursor-based output polling without retransmitting already-consumed text, enforce active/history limits and a session timeout, and are cancelled when that connection is torn down. Terminal states are published only after output readers finish, so a completed snapshot cannot race ahead of its final retained output. They are not interactive PTYs and do not widen the executable surface. See `docs/command-sessions.md`.
 
