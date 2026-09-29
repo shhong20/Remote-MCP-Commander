@@ -43,6 +43,7 @@ Agents initiate outbound connections, so controlled hosts do not need inbound SS
 - Persistent append-only JSONL audit journal with centralized redaction
 - Native systemd + Caddy TLS deployment templates with startup preflight doctor
 - Offline `remote-mcp-doctor` role preflight wired into systemd startup
+- Domain-separated Ed25519 publication signatures for package manifests and runtime locks
 - Ruff + pytest CI
 
 ## Quick start
@@ -137,7 +138,7 @@ Gateway and MCP run under separate unprivileged `remote-mcp-gateway` and `remote
 
 Use `remote-mcp-doctor gateway|mcp|agent` to validate the effective deployment environment; `--json` is available for automation. The systemd templates run the role-specific doctor as `ExecStartPre`. See `docs/deployment-doctor.md`.
 
-Prepared releases are sealed with an exact-tree SHA-256 manifest, signed with Ed25519, verified against public keys outside the release tree, switched through atomic `current`/`previous` symlinks, and can be rolled back only to another trusted signed release. The release manager never downloads code or restarts services. See `docs/release-lifecycle.md`, `docs/release-integrity.md`, and `docs/release-signing.md`. Reproducible source/wheel transport artifacts can be generated from an exact Git commit with `remote-mcp-package`; the builder self-checks byte-for-byte reproduction under a pinned toolchain, and package manifests can be signed in a separate Ed25519 publication trust domain. See `docs/reproducible-packaging.md` and `docs/package-publication.md`. Trusted packages can then be resolved into an exact CPython 3.11/Linux x86_64 wheelhouse with `remote-mcp-runtime`, including an offline dependency-closure check. See `docs/runtime-input-locks.md`.
+Prepared releases are sealed with an exact-tree SHA-256 manifest, signed with Ed25519, verified against public keys outside the release tree, switched through atomic `current`/`previous` symlinks, and can be rolled back only to another trusted signed release. The release manager never downloads code or restarts services. See `docs/release-lifecycle.md`, `docs/release-integrity.md`, and `docs/release-signing.md`. Reproducible source/wheel transport artifacts can be generated from an exact Git commit with `remote-mcp-package`; the builder self-checks byte-for-byte reproduction under a pinned toolchain, and package manifests can be signed in a separate Ed25519 publication trust domain. See `docs/reproducible-packaging.md` and `docs/package-publication.md`. Trusted packages can then be resolved into an exact CPython 3.11/Linux x86_64 wheelhouse with `remote-mcp-runtime`, including an offline dependency-closure check and a separately signed runtime lock. See `docs/runtime-input-locks.md` and `docs/runtime-publication.md`.
 
 See `docs/native-deployment.md` and `deploy/`.
 
@@ -185,7 +186,7 @@ The journal is append-only JSONL, bounds tail scans, and centrally redacts sensi
 
 - interactive PTY sessions with a separate approval/policy boundary
 - cryptographic audit chaining, retention, and remote log shipping
-- signed runtime-lock publication, artifact registry publication, and automated health-check rollback
+- artifact registry publication and automated health-check rollback
 - multi-user RBAC and stronger OAuth/OIDC integration
 - signed/versioned policy distribution to Agents
 

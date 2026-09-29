@@ -33,6 +33,7 @@ from remote_mcp_commander.package_signing import (
 )
 
 RUNTIME_LOCK_FILENAME = "runtime-lock.json"
+RUNTIME_SIGNATURE_FILENAME = "runtime-lock.sig.json"
 WHEELHOUSE_DIRNAME = "wheelhouse"
 RUNTIME_LOCK_SCHEMA_VERSION = 1
 MAX_LOCK_BYTES = 4 * 1024 * 1024
@@ -464,10 +465,9 @@ def verify_runtime_bundle(
         raise RuntimeLockError("runtime bundle does not exist") from exc
     if not runtime_bundle.is_dir():
         raise RuntimeLockError("runtime bundle must be a directory")
-    if {item.name for item in runtime_bundle.iterdir()} != {
-        RUNTIME_LOCK_FILENAME,
-        WHEELHOUSE_DIRNAME,
-    }:
+    expected = {RUNTIME_LOCK_FILENAME, WHEELHOUSE_DIRNAME}
+    allowed_sets = (expected, expected | {RUNTIME_SIGNATURE_FILENAME})
+    if {item.name for item in runtime_bundle.iterdir()} not in allowed_sets:
         raise RuntimeLockError("runtime bundle file set is invalid")
 
     lock = load_runtime_lock(runtime_bundle)
@@ -508,10 +508,7 @@ def verify_runtime_bundle(
     if resolved != locked_versions:
         raise RuntimeLockError("offline dependency closure does not match the runtime lock")
 
-    if {item.name for item in runtime_bundle.iterdir()} != {
-        RUNTIME_LOCK_FILENAME,
-        WHEELHOUSE_DIRNAME,
-    }:
+    if {item.name for item in runtime_bundle.iterdir()} not in allowed_sets:
         raise RuntimeLockError("runtime bundle changed during verification")
     return lock
 
@@ -531,7 +528,7 @@ def _print_lock(lock: RuntimeLock, *, json_output: bool) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Lock and verify Remote MCP Commander runtime wheels"
+        description="Lock, sign, and verify Remote MCP Commander runtime wheels"
     )
     subparsers = parser.add_subparsers(dest="action", required=True)
     lock_parser = subparsers.add_parser("lock")
@@ -546,7 +543,29 @@ def main(argv: list[str] | None = None) -> int:
     verify_parser.add_argument("--trusted-package-keys", required=True)
     verify_parser.add_argument("--python", default=sys.executable)
     verify_parser.add_argument("--json", action="store_true", dest="json_output")
+    sign_parser = subparsers.add_parser("sign")
+    sign_parser.add_argument("--runtime-bundle", required=True)
+    sign_parser.add_argument("--package-bundle", required=True)
+    sign_parser.add_argument("--trusted-package-keys", required=True)
+    sign_parser.add_argument("--key-id", required=True)
+    sign_parser.add_argument("--private-key", required=True)
+    sign_parser.add_argument("--python", default=sys.executable)
+    sign_parser.add_argument("--json", action="store_true", dest="json_output")
+    trusted_parser = subparsers.add_parser("verify-trusted")
+    trusted_parser.add_argument("--runtime-bundle", required=True)
+    trusted_parser.add_argument("--package-bundle", required=True)
+    trusted_parser.add_argument("--trusted-package-keys", required=True)
+    trusted_parser.add_argument("--trusted-runtime-keys", required=True)
+    trusted_parser.add_argument("--python", default=sys.executable)
+    trusted_parser.add_argument("--json", action="store_true", dest="json_output")
     args = parser.parse_args(argv)
+
+    from remote_mcp_commander.runtime_signing import (
+        RuntimeSigningError,
+        sign_runtime_bundle,
+        verify_signed_runtime_bundle,
+    )
+
     try:
         if args.action == "lock":
             lock = create_runtime_bundle(
@@ -555,14 +574,52 @@ def main(argv: list[str] | None = None) -> int:
                 output=Path(args.output),
                 python_executable=args.python,
             )
-        else:
+        elif args.action == "verify":
             lock = verify_runtime_bundle(
                 runtime_bundle=Path(args.runtime_bundle),
                 package_bundle=Path(args.package_bundle),
                 trusted_package_keys=Path(args.trusted_package_keys),
                 python_executable=args.python,
             )
-    except RuntimeLockError as exc:
+        elif args.action == "sign":
+            signature = sign_runtime_bundle(
+                Path(args.runtime_bundle),
+                package_bundle=Path(args.package_bundle),
+                trusted_package_keys=Path(args.trusted_package_keys),
+                key_id=args.key_id,
+                private_key_path=Path(args.private_key),
+                python_executable=args.python,
+            )
+            payload = signature.model_dump(mode="json")
+            if args.json_output:
+                print(json.dumps(payload, sort_keys=True))
+            else:
+                print(f"signed runtime lock with key: {signature.key_id}")
+                print(f"lock_sha256: {signature.lock_sha256}")
+            return 0
+        else:
+            lock, signature = verify_signed_runtime_bundle(
+                Path(args.runtime_bundle),
+                package_bundle=Path(args.package_bundle),
+                trusted_package_keys=Path(args.trusted_package_keys),
+                trusted_runtime_keys=Path(args.trusted_runtime_keys),
+                python_executable=args.python,
+            )
+            if args.json_output:
+                print(
+                    json.dumps(
+                        {
+                            "lock": lock.model_dump(mode="json"),
+                            "signature": signature.model_dump(mode="json"),
+                        },
+                        sort_keys=True,
+                    )
+                )
+            else:
+                print(f"trusted runtime: {lock.package_version}")
+                print(f"signing_key: {signature.key_id}")
+            return 0
+    except (RuntimeLockError, RuntimeSigningError) as exc:
         if args.json_output:
             print(json.dumps({"ok": False, "error": str(exc)}, sort_keys=True))
         else:
