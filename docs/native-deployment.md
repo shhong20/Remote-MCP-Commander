@@ -27,6 +27,7 @@ Suggested paths:
 /opt/remote-mcp-commander/releases/<id>/ application + venv
 /opt/remote-mcp-commander/current -> releases/<id>
 /opt/remote-mcp-commander/trusted-release-keys/  root-managed Ed25519 public keys
+/etc/remote-mcp-commander/trusted-package-keys/ package-publication Ed25519 public keys
 /etc/remote-mcp-commander/gateway.env    Gateway secrets/config, mode 0600
 /etc/remote-mcp-commander/mcp.env        MCP secrets/config, mode 0600
 /var/lib/remote-mcp-commander/           registry and audit journal
@@ -103,3 +104,7 @@ Release trees are sealed with SHA-256 manifests before activation, and the servi
 ## Signed activation
 
 Production `activate` and `rollback` verify Ed25519 signatures against the root-level `trusted-release-keys/` directory. Keep private signing keys off the deployment host. Add new public keys before rotation and retain old keys while rollback targets still depend on them. See `release-signing.md`.
+
+## Trusted package intake
+
+Before a package bundle is used to prepare a host release, run `remote-mcp-package verify-trusted` against the separate package-publication trust store. Package-signing keys and release-signing keys are independent trust domains; use separate key pairs and directories. See `package-publication.md`.
