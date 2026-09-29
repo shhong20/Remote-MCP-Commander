@@ -9,3 +9,4 @@
 - [Agent capabilities](agent-capabilities.md)
 - [Deployment doctor](deployment-doctor.md)
 - [Protocol compatibility](protocol-compatibility.md)
+- [Release lifecycle](release-lifecycle.md)

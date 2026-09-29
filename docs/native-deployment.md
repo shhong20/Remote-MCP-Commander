@@ -24,7 +24,8 @@ Suggested paths. The application tree can be root-owned/read-only to both servic
 Suggested paths:
 
 ```text
-/opt/remote-mcp-commander/current/       checked-out application + venv
+/opt/remote-mcp-commander/releases/<id>/ application + venv
+/opt/remote-mcp-commander/current -> releases/<id>
 /etc/remote-mcp-commander/gateway.env    Gateway secrets/config, mode 0600
 /etc/remote-mcp-commander/mcp.env        MCP secrets/config, mode 0600
 /var/lib/remote-mcp-commander/           registry and audit journal
@@ -91,3 +92,5 @@ Before connecting an MCP client, verify the Gateway `/healthz` locally, inspect 
 Then validate read-only tools such as `system_health`, `lookup_port`, `service_status`, filesystem discovery, and `git_status` before enabling any workflow that uses approval-gated mutations.
 
 Keep the approval-admin credential outside MCP client configuration. Mutation approvals are intentionally an operator-side action.
+
+For atomic local release selection and rollback, see `release-lifecycle.md`.
