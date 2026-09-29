@@ -23,6 +23,9 @@ class Settings(BaseSettings):
     control_token: str = ""
     approval_admin_token: str = ""
     approval_ttl_s: int = Field(default=60, ge=15, le=600)
+    audit_path: str = "~/.remote-mcp-commander/audit.jsonl"
+    audit_fsync: bool = False
+    audit_query_max_scan_bytes: int = Field(default=2_097_152, ge=65_536, le=16_777_216)
     registry_path: str = "~/.remote-mcp-commander/registry.json"
     enrollment_ttl_s: int = Field(default=300, ge=30, le=3600)
     bind_host: str = "127.0.0.1"
@@ -82,6 +85,10 @@ class Settings(BaseSettings):
     @property
     def registry_file(self) -> Path:
         return Path(self.registry_path).expanduser()
+
+    @property
+    def audit_file(self) -> Path:
+        return Path(self.audit_path).expanduser()
 
     @property
     def agent_token_path(self) -> Path:

@@ -4,6 +4,7 @@ import asyncio
 import re
 import secrets
 import uuid
+from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from functools import lru_cache
@@ -12,11 +13,25 @@ from time import perf_counter
 from typing import Annotated
 
 import uvicorn
-from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect, status
+from fastapi import (
+    Depends,
+    FastAPI,
+    Header,
+    HTTPException,
+    Query,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 
 from remote_mcp_commander.config import Settings, get_settings
 from remote_mcp_commander.gateway.approvals import ApprovalError, ApprovalStore
-from remote_mcp_commander.gateway.audit import audit
+from remote_mcp_commander.gateway.audit import (
+    audit,
+    audit_required,
+    configure_audit,
+    current_journal,
+)
 from remote_mcp_commander.gateway.registry import DeviceRegistry
 from remote_mcp_commander.policy import validate_generic_argv
 from remote_mcp_commander.protocol import (
@@ -25,6 +40,7 @@ from remote_mcp_commander.protocol import (
     AgentList,
     ApprovalCreateBody,
     ApprovalTicket,
+    AuditQueryResult,
     CommandRequest,
     CommandResult,
     EnrollmentClaimBody,
@@ -81,7 +97,18 @@ class AgentConnection:
     pending: dict[str, asyncio.Future[AgentReply]] = field(default_factory=dict)
 
 
-app = FastAPI(title="Remote MCP Commander Gateway", version="0.3.0")
+@asynccontextmanager
+async def lifespan(_: FastAPI):
+    settings = get_settings()
+    configure_audit(settings.audit_file, fsync=settings.audit_fsync)
+    yield
+
+
+app = FastAPI(
+    title="Remote MCP Commander Gateway",
+    version="0.7.0",
+    lifespan=lifespan,
+)
 connections: dict[str, AgentConnection] = {}
 SettingsDep = Annotated[Settings, Depends(get_settings)]
 AuthorizationHeader = Annotated[str | None, Header()]
@@ -220,11 +247,12 @@ async def create_approval(body: ApprovalCreateBody, settings: SettingsDep) -> Ap
         target=body.target,
         ttl_s=settings.approval_ttl_s,
     )
-    audit(
+    audit_required(
         "approval_issued",
         approval_id=grant.approval_id,
         agent_id=grant.agent_id,
         operation=grant.operation,
+        target=grant.target,
         expires_at=grant.expires_at.isoformat(),
     )
     return ApprovalTicket(
@@ -242,12 +270,36 @@ async def healthz() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@app.get(
+    "/api/v1/audit",
+    dependencies=[Depends(require_control_token)],
+)
+async def list_audit_records(
+    settings: SettingsDep,
+    limit: Annotated[int, Query(ge=1, le=200)] = 100,
+    event: Annotated[str | None, Query(max_length=128)] = None,
+    agent_id: Annotated[str | None, Query(max_length=128)] = None,
+) -> AuditQueryResult:
+    journal = current_journal()
+    if journal is None:
+        journal = configure_audit(settings.audit_file, fsync=settings.audit_fsync)
+    records, truncated = await asyncio.to_thread(
+        journal.read_recent,
+        limit=limit,
+        event=event,
+        agent_id=agent_id,
+        max_scan_bytes=settings.audit_query_max_scan_bytes,
+    )
+    return AuditQueryResult(records=records, scan_truncated=truncated)
+
+
 @app.post(
     "/api/v1/enrollments",
     dependencies=[Depends(require_control_token)],
     status_code=status.HTTP_201_CREATED,
 )
 async def create_enrollment(body: EnrollmentCreateBody, settings: SettingsDep) -> EnrollmentTicket:
+    audit_required("enrollment_create_requested", agent_id=body.agent_id)
     registry = registry_for(str(settings.registry_file))
     code, expires_at = await registry.create_enrollment(body.agent_id, settings.enrollment_ttl_s)
     audit("enrollment_created", agent_id=body.agent_id, expires_at=expires_at.isoformat())
@@ -259,6 +311,7 @@ async def claim_enrollment(
     body: EnrollmentClaimBody,
     settings: SettingsDep,
 ) -> EnrollmentClaimResult:
+    audit_required("enrollment_claim_requested", agent_id=body.agent_id)
     registry = registry_for(str(settings.registry_file))
     try:
         token = await registry.claim_enrollment(body.agent_id, body.code)
@@ -296,6 +349,7 @@ async def list_registrations(settings: SettingsDep) -> RegisteredDeviceList:
     dependencies=[Depends(require_control_token)],
 )
 async def revoke_agent(agent_id: str, settings: SettingsDep) -> RevokeResult:
+    audit_required("agent_revoke_requested", agent_id=agent_id)
     registry = registry_for(str(settings.registry_file))
     if not await registry.revoke(agent_id):
         raise HTTPException(status_code=404, detail="registered device not found")
@@ -436,6 +490,12 @@ async def write_file(agent_id: str, body: FileWriteBody, settings: SettingsDep) 
     connection = connections.get(agent_id)
     if connection is None:
         raise HTTPException(status_code=404, detail="agent not connected")
+    audit_required(
+        "file_write_requested",
+        agent_id=agent_id,
+        path=body.path,
+        overwrite=body.overwrite,
+    )
     request_id = uuid.uuid4().hex
     future = pending_request(connection, request_id)
     try:
@@ -550,11 +610,12 @@ async def terminate_agent_process(
 
     request_id = uuid.uuid4().hex
     future = pending_request(connection, request_id)
-    audit(
+    audit_required(
         "approval_consumed",
         approval_id=grant.approval_id,
         agent_id=agent_id,
         operation=grant.operation,
+        target=grant.target,
     )
     try:
         request = ProcessTerminateRequest(
@@ -600,11 +661,12 @@ async def mutate_agent_service(
 
     request_id = uuid.uuid4().hex
     future = pending_request(connection, request_id)
-    audit(
+    audit_required(
         "approval_consumed",
         approval_id=grant.approval_id,
         agent_id=agent_id,
         operation=grant.operation,
+        target=grant.target,
     )
     try:
         request = ServiceActionRequest(

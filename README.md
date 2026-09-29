@@ -40,7 +40,7 @@ Agents initiate outbound connections, so controlled hosts do not need inbound SS
 - Actual Gateway -> Agent RTT ping
 - Agent metadata, heartbeat, and `last_seen`
 - Command timeout and bounded stdout/stderr
-- Structured audit events
+- Persistent append-only JSONL audit journal with centralized redaction
 - Ruff + pytest CI
 
 ## Quick start
@@ -121,6 +121,15 @@ The Gateway consumes the approval before dispatching the mutation. This gives at
 
 Read-only/control endpoints use `COMMANDER_CONTROL_TOKEN`. Approval issuance uses the separate operator-only approval credential. Do not expose the Gateway directly to an untrusted network; use TLS/reverse-proxy protection for non-loopback deployment.
 
+Recent persistent audit records are available only through the control API, not through MCP:
+
+```bash
+curl -H "Authorization: Bearer $COMMANDER_CONTROL_TOKEN" \
+  'http://127.0.0.1:8765/api/v1/audit?limit=100&agent_id=server-01'
+```
+
+The journal is append-only JSONL, bounds tail scans, and centrally redacts sensitive field names before both logging and persistence. See `docs/persistent-audit.md`.
+
 ## Security principles
 
 1. Deny by default.
@@ -137,7 +146,7 @@ Read-only/control endpoints use `COMMANDER_CONTROL_TOKEN`. Approval issuance use
 ## Planned next
 
 - cancellable/persistent terminal sessions with explicit policy boundaries
-- persistent audit storage and audit-query tools
+- cryptographic audit chaining, retention, and remote log shipping
 - TLS/reverse-proxy deployment templates
 - multi-user RBAC and stronger OAuth/OIDC integration
 - signed/versioned policy distribution to Agents
