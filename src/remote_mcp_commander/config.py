@@ -26,6 +26,12 @@ class Settings(BaseSettings):
     audit_path: str = "~/.remote-mcp-commander/audit.jsonl"
     audit_fsync: bool = False
     audit_query_max_scan_bytes: int = Field(default=2_097_152, ge=65_536, le=16_777_216)
+    audit_max_bytes: int = Field(default=16_777_216, ge=65_536, le=1_073_741_824)
+    audit_retention_files: int = Field(default=5, ge=1, le=100)
+    audit_remote_url: str = ""
+    audit_remote_token: str = ""
+    audit_remote_required: bool = False
+    audit_remote_timeout_s: float = Field(default=2.0, ge=0.1, le=30.0)
     registry_path: str = "~/.remote-mcp-commander/registry.json"
     enrollment_ttl_s: int = Field(default=300, ge=30, le=3600)
     bind_host: str = "127.0.0.1"
@@ -170,6 +176,25 @@ class Settings(BaseSettings):
         ]
         if any(self._credential_is_unsafe(value) for value in static_agent_credentials):
             raise ValueError("replace all configured static Agent credentials before startup")
+        if self.audit_remote_required and not self.audit_remote_url:
+            raise ValueError("required remote audit delivery needs COMMANDER_AUDIT_REMOTE_URL")
+        if self.audit_remote_url:
+            self._require_secure_remote_url(self.audit_remote_url, "https", "http")
+        if self.audit_remote_token and self._credential_is_unsafe(self.audit_remote_token):
+            raise ValueError("replace the placeholder remote audit credential before startup")
+        if self.audit_remote_token:
+            local_credentials = [
+                self.control_token,
+                self.approval_admin_token,
+                self.mcp_token,
+                self.agent_token,
+                *self.agent_tokens.values(),
+            ]
+            if any(
+                value and secrets.compare_digest(value, self.audit_remote_token)
+                for value in local_credentials
+            ):
+                raise ValueError("remote audit credential must be unique")
 
     def validate_agent_security(self, token: str) -> None:
         if self._credential_is_unsafe(token):

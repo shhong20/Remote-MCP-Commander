@@ -49,6 +49,7 @@ from remote_mcp_commander.protocol import (
     ApprovalCreateBody,
     ApprovalTicket,
     AuditQueryResult,
+    AuditVerificationResult,
     CommandRequest,
     CommandResult,
     CommandSessionCancelRequest,
@@ -171,8 +172,24 @@ class AgentConnection:
 @asynccontextmanager
 async def lifespan(_: FastAPI):
     settings = get_settings()
-    configure_audit(settings.audit_file, fsync=settings.audit_fsync)
+    configure_audit_for(settings)
     yield
+
+
+def configure_audit_for(settings: Settings):
+    journal = current_journal()
+    if journal is not None and journal.path == settings.audit_file:
+        return journal
+    return configure_audit(
+        settings.audit_file,
+        fsync=settings.audit_fsync,
+        max_bytes=settings.audit_max_bytes,
+        retention_files=settings.audit_retention_files,
+        remote_url=settings.audit_remote_url,
+        remote_token=settings.audit_remote_token,
+        remote_required=settings.audit_remote_required,
+        remote_timeout_s=settings.audit_remote_timeout_s,
+    )
 
 
 app = FastAPI(
@@ -391,9 +408,7 @@ async def list_audit_records(
     event: Annotated[str | None, Query(max_length=128)] = None,
     agent_id: Annotated[str | None, Query(max_length=128)] = None,
 ) -> AuditQueryResult:
-    journal = current_journal()
-    if journal is None:
-        journal = configure_audit(settings.audit_file, fsync=settings.audit_fsync)
+    journal = configure_audit_for(settings)
     records, truncated = await asyncio.to_thread(
         journal.read_recent,
         limit=limit,
@@ -402,6 +417,15 @@ async def list_audit_records(
         max_scan_bytes=settings.audit_query_max_scan_bytes,
     )
     return AuditQueryResult(records=records, scan_truncated=truncated)
+
+
+@app.get(
+    "/api/v1/audit/verify",
+    dependencies=[Depends(require_control_token)],
+)
+async def verify_audit_records(settings: SettingsDep) -> AuditVerificationResult:
+    journal = configure_audit_for(settings)
+    return await asyncio.to_thread(journal.verify)
 
 
 @app.post(
