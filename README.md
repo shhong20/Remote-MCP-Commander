@@ -97,6 +97,9 @@ The current MCP tools are intentionally narrow:
 - `lookup_port(agent_id, port)` - find bounded TCP listeners without exposing process command lines
 - `service_logs(agent_id, unit, lines)` - bounded recent journal entries for one validated systemd unit
 - `git_status(agent_id, path)` - bounded porcelain-v2 status for a normal Git repo inside allowed roots
+- `list_file_roots(agent_id)` - show filesystem roots explicitly exposed by the Agent
+- `list_directory(agent_id, path, limit)` - bounded, non-recursive directory listing inside allowed roots
+- `file_info(agent_id, path)` - lstat-style metadata without following the final symlink
 - `execute(agent_id, argv)` - structured argv execution under fixed safe profiles
 - `start_command(agent_id, argv)` - start a connection-scoped cancellable safe-profile command session
 - `command_status(agent_id, session_id)` - read current session state and retained bounded output
@@ -115,6 +118,8 @@ The current MCP tools are intentionally narrow:
 Read-only diagnostics do not widen generic execution. Port lookup uses psutil without returning process command lines or environments. Service logs call a fixed trusted-path `journalctl` argv with validated unit names and bounded lines/output. Git status is restricted to normal `.git/` directory repositories fully inside configured allowed roots; gitfile/worktree and symlink metadata are rejected, and fsmonitor/hooks/global configuration/pagers are disabled for the fixed status command. See `docs/read-only-diagnostics.md`.
 
 Command sessions use the exact same generic policy. They persist across MCP calls while the Agent WebSocket connection is alive, incrementally drain bounded stdout/stderr, support cursor-based output polling without retransmitting already-consumed text, enforce active/history limits and a session timeout, and are cancelled when that connection is torn down. Terminal states are published only after output readers finish, so a completed snapshot cannot race ahead of its final retained output. They are not interactive PTYs and do not widen the executable surface. See `docs/command-sessions.md`.
+
+Filesystem discovery uses the same allowed-root boundary. Directory listing is non-recursive and bounded to 500 entries. Entries expose only name/path/type, regular-file size, and modification time; symlink targets are not followed or returned. `file_info` uses lstat-style metadata for the final path, so an allowed-root symlink cannot reveal its target metadata/content. See `docs/filesystem-discovery.md`.
 
 File tools are deny-by-default until `COMMANDER_ALLOWED_ROOTS_JSON` is configured with absolute directories. Paths are canonicalized before access so symlink escapes outside those roots are rejected. Existing files require `overwrite=true` plus the SHA-256 returned by a prior `read_file`, providing optimistic stale-write protection. The current text-file MVP caps files at 1 MiB and does not expose delete, move, recursive directory, or arbitrary binary transfer operations.
 

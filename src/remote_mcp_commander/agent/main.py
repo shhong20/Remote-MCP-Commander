@@ -11,6 +11,7 @@ from remote_mcp_commander import __version__
 from remote_mcp_commander.agent.diagnostics import lookup_port, service_logs, system_health
 from remote_mcp_commander.agent.executor import execute_argv
 from remote_mcp_commander.agent.file_ops import allowed_roots, read_text_file, write_text_file
+from remote_mcp_commander.agent.filesystem_ops import file_info, list_directory, list_file_roots
 from remote_mcp_commander.agent.git_ops import git_status
 from remote_mcp_commander.agent.session_ops import CommandSessionManager
 from remote_mcp_commander.agent.system_ops import (
@@ -28,7 +29,10 @@ from remote_mcp_commander.protocol import (
     CommandSessionOutputRequest,
     CommandSessionStartRequest,
     CommandSessionStatusRequest,
+    DirectoryListRequest,
+    FileInfoRequest,
     FileReadRequest,
+    FileRootListRequest,
     FileWriteRequest,
     GitStatusRequest,
     Heartbeat,
@@ -165,6 +169,33 @@ async def agent_loop() -> None:
                         if message_type == "command_session_discard_request":
                             request = CommandSessionDiscardRequest.model_validate(payload)
                             result = await sessions.discard(request.request_id, request.session_id)
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "file_root_list_request":
+                            request = FileRootListRequest.model_validate(payload)
+                            result = await list_file_roots(request.request_id, roots)
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "directory_list_request":
+                            request = DirectoryListRequest.model_validate(payload)
+                            result = await list_directory(
+                                request.request_id,
+                                request.path,
+                                roots=roots,
+                                limit=request.limit,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "file_info_request":
+                            request = FileInfoRequest.model_validate(payload)
+                            result = await file_info(
+                                request.request_id,
+                                request.path,
+                                roots=roots,
+                            )
                             await websocket.send(result.model_dump_json())
                             continue
 

@@ -15,7 +15,10 @@ from remote_mcp_commander.protocol import (
     CommandSessionDiscardResult,
     CommandSessionOutput,
     CommandSessionSnapshot,
+    DirectoryListResult,
+    FileInfoResult,
     FileReadResult,
+    FileRootListResult,
     FileWriteResult,
     GitStatusResult,
     PingResponse,
@@ -146,6 +149,21 @@ def build_mcp(settings: Settings) -> MCPServer:
     async def discard_command(agent_id: str, session_id: str) -> CommandSessionDiscardResult:
         """Discard a completed command session from Agent history."""
         return await GatewayClient(settings).discard_command_session(agent_id, session_id)
+
+    @server.tool()
+    async def list_file_roots(agent_id: str) -> FileRootListResult:
+        """List the absolute filesystem roots explicitly allowed by the Agent."""
+        return await GatewayClient(settings).list_file_roots(agent_id)
+
+    @server.tool()
+    async def list_directory(agent_id: str, path: str, limit: int = 200) -> DirectoryListResult:
+        """List one directory inside allowed roots without recursive traversal."""
+        return await GatewayClient(settings).list_directory(agent_id, path, limit=limit)
+
+    @server.tool()
+    async def file_info(agent_id: str, path: str) -> FileInfoResult:
+        """Read lstat-style metadata for one path without following the final symlink."""
+        return await GatewayClient(settings).file_info(agent_id, path)
 
     @server.tool()
     async def read_file(

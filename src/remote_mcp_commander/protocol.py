@@ -162,6 +162,72 @@ class FileWriteBody(BaseModel):
     expected_sha256: str | None = Field(default=None, min_length=64, max_length=64)
 
 
+FileEntryKind = Literal["file", "directory", "symlink", "other"]
+
+
+class FileRootListRequest(BaseModel):
+    type: Literal["file_root_list_request"] = "file_root_list_request"
+    request_id: str
+
+
+class FileRootListResult(BaseModel):
+    type: Literal["file_root_list_result"] = "file_root_list_result"
+    request_id: str
+    roots: list[str] = Field(default_factory=list)
+
+
+class DirectoryEntry(BaseModel):
+    name: str
+    path: str
+    kind: FileEntryKind
+    size: int | None = None
+    modified_at: datetime | None = None
+
+
+class DirectoryListRequest(BaseModel):
+    type: Literal["directory_list_request"] = "directory_list_request"
+    request_id: str
+    path: str = Field(min_length=1, max_length=4096)
+    limit: int = Field(default=200, ge=1, le=500)
+
+
+class DirectoryListResult(BaseModel):
+    type: Literal["directory_list_result"] = "directory_list_result"
+    request_id: str
+    path: str = ""
+    entries: list[DirectoryEntry] = Field(default_factory=list)
+    truncated: bool = False
+    rejected: bool = False
+    error: str | None = None
+
+
+class DirectoryListBody(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+    limit: int = Field(default=200, ge=1, le=500)
+
+
+class FileInfoRequest(BaseModel):
+    type: Literal["file_info_request"] = "file_info_request"
+    request_id: str
+    path: str = Field(min_length=1, max_length=4096)
+
+
+class FileInfoResult(BaseModel):
+    type: Literal["file_info_result"] = "file_info_result"
+    request_id: str
+    path: str = ""
+    kind: FileEntryKind | None = None
+    size: int | None = None
+    modified_at: datetime | None = None
+    mode: str | None = None
+    rejected: bool = False
+    error: str | None = None
+
+
+class FileInfoBody(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+
+
 class ProcessInfo(BaseModel):
     pid: int
     create_time_ms: int
