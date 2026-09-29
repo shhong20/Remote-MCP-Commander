@@ -38,7 +38,7 @@ Agents initiate outbound connections, so controlled hosts do not need inbound SS
 - `create_subprocess_exec(..., shell=False)` command execution
 - Request/response correlation with request IDs
 - Actual Gateway -> Agent RTT ping
-- Agent metadata, heartbeat, and `last_seen`
+- Agent metadata, heartbeat, `last_seen`, and runtime capability advertisement
 - Command timeout and bounded stdout/stderr
 - Persistent append-only JSONL audit journal with centralized redaction
 - Native systemd + Caddy TLS deployment templates
@@ -115,6 +115,8 @@ The current MCP tools are intentionally narrow:
 - `service_action(...)` - approval-gated `start`, `stop`, or `restart` for one exact systemd unit
 
 `execute` never accepts a shell command string. It is also limited to fixed safe generic profiles: `echo`, argument-free `hostname`, `whoami`, and `uptime`. Generic execution accepts bare executable names only, resolves them from the fixed trusted search path `/usr/bin:/bin`, and gives the child the same restricted `PATH`. Adding `systemctl`, a shell/interpreter, another executable, or an absolute-path alias to configuration therefore does not bypass the mutation approval path. Gateway policy and Agent policy must both allow the executable.
+
+Connected Agents advertise a bounded capability set derived from their real local environment (for example files, Git, systemd, journal logs, process inspection, and safe command sessions). `list_devices` and `device_info` include this list so MCP clients can choose supported tools before attempting a call. Capabilities describe an available Agent-side path, not guaranteed OS permission for every target. See `docs/agent-capabilities.md`.
 
 Read-only diagnostics do not widen generic execution. Port lookup uses psutil without returning process command lines or environments. Service logs call a fixed trusted-path `journalctl` argv with validated unit names and bounded lines/output. Git status is restricted to normal `.git/` directory repositories fully inside configured allowed roots; gitfile/worktree and symlink metadata are rejected, and fsmonitor/hooks/global configuration/pagers are disabled for the fixed status command. See `docs/read-only-diagnostics.md`.
 
