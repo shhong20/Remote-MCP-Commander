@@ -41,6 +41,7 @@ Agents initiate outbound connections, so controlled hosts do not need inbound SS
 - Agent metadata, heartbeat, and `last_seen`
 - Command timeout and bounded stdout/stderr
 - Persistent append-only JSONL audit journal with centralized redaction
+- Native systemd + Caddy TLS deployment templates
 - Ruff + pytest CI
 
 ## Quick start
@@ -123,6 +124,14 @@ Filesystem discovery uses the same allowed-root boundary. Directory listing is n
 
 File tools are deny-by-default until `COMMANDER_ALLOWED_ROOTS_JSON` is configured with absolute directories. Paths are canonicalized before access so symlink escapes outside those roots are rejected. Existing files require `overwrite=true` plus the SHA-256 returned by a prior `read_file`, providing optimistic stale-write protection. The current text-file MVP caps files at 1 MiB and does not expose delete, move, recursive directory, or arbitrary binary transfer operations.
 
+## Native deployment
+
+For a long-running host deployment, keep Gateway and MCP services bound to `127.0.0.1` and place Caddy in front for HTTPS/WSS. The repository includes hardened systemd service templates for Gateway/MCP plus a systemd **user** service for each controlled-host Agent.
+
+Gateway and MCP run under separate unprivileged `remote-mcp-gateway` and `remote-mcp-server` accounts. Agents should run as the ordinary OS user whose files/processes are intentionally exposed; do not run an Agent as root just to gain visibility. Deployment environment examples intentionally contain no credentials.
+
+See `docs/native-deployment.md` and `deploy/`.
+
 ## Mutation approvals
 
 Approval creation is deliberately outside the MCP tool surface. An operator uses the Gateway `POST /api/v1/approvals` endpoint with the separate `COMMANDER_APPROVAL_ADMIN_TOKEN`. The request binds an approval to one `agent_id`, one operation (`process.terminate`, `service.start`, `service.stop`, or `service.restart`), and one exact target.
@@ -165,7 +174,7 @@ The journal is append-only JSONL, bounds tail scans, and centrally redacts sensi
 
 - interactive PTY sessions with a separate approval/policy boundary
 - cryptographic audit chaining, retention, and remote log shipping
-- TLS/reverse-proxy deployment templates
+- production upgrade/rollback automation and release packaging
 - multi-user RBAC and stronger OAuth/OIDC integration
 - signed/versioned policy distribution to Agents
 

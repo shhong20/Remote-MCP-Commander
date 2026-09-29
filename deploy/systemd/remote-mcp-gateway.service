@@ -1,0 +1,33 @@
+[Unit]
+Description=Remote MCP Commander Gateway
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=remote-mcp-gateway
+Group=remote-mcp-gateway
+WorkingDirectory=/opt/remote-mcp-commander/current
+EnvironmentFile=/etc/remote-mcp-commander/gateway.env
+ExecStart=/opt/remote-mcp-commander/current/.venv/bin/remote-mcp-gateway
+Restart=on-failure
+RestartSec=3s
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectProc=invisible
+ProcSubset=pid
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/remote-mcp-commander
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
+
+[Install]
+WantedBy=multi-user.target
