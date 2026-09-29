@@ -145,3 +145,13 @@ def test_chatgpt_example_requires_single_user_oauth_without_embedded_secrets() -
     assert env_value(text, "COMMANDER_MCP_HOST") == "127.0.0.1"
     assert env_value(text, "COMMANDER_MCP_ISSUER_URL").startswith("https://")
     assert env_value(text, "COMMANDER_MCP_RESOURCE_URL").endswith("/mcp")
+
+
+def test_private_tunnel_example_uses_local_stdio_without_embedded_secrets() -> None:
+    text = read("deploy/tunnel.env.example")
+    assert env_value(text, "CONTROL_PLANE_API_KEY") == ""
+    assert env_value(text, "COMMANDER_TUNNEL_ID") == ""
+    assert env_value(text, "COMMANDER_CONTROL_TOKEN") == ""
+    assert env_value(text, "COMMANDER_MCP_TRANSPORT") == "stdio"
+    assert env_value(text, "COMMANDER_GATEWAY_HTTP") == "http://127.0.0.1:8765"
+    assert "COMMANDER_APPROVAL_ADMIN_TOKEN=" not in text

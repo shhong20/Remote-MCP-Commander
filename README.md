@@ -80,6 +80,12 @@ Revocation closes an active connection and prevents the old credential from reco
 
 ## MCP server
 
+For personal **web/mobile ChatGPT** access without purchasing a domain or using
+Auth0, see the [private tunnel checklist](docs/chatgpt-private-tunnel.md).
+The server-side stdio child uses `remote-mcp-tunnel-stdio`; this does not require
+the user to switch to a desktop client. Account access, tunnel cost conditions,
+and actual mobile tool calls must still be verified before claiming completion.
+
 For a local MCP host, use stdio:
 
 ```bash
