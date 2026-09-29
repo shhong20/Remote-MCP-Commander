@@ -135,6 +135,7 @@ class AgentConnection:
     hostname: str | None = None
     platform: str | None = None
     version: str | None = None
+    capabilities: list[str] = field(default_factory=list)
     pending: dict[str, asyncio.Future[AgentReply]] = field(default_factory=dict)
 
 
@@ -240,6 +241,7 @@ def agent_info(agent_id: str, connection: AgentConnection) -> AgentInfo:
         hostname=connection.hostname,
         platform=connection.platform,
         version=connection.version,
+        capabilities=connection.capabilities,
         connected_at=connection.connected_at,
         last_seen=connection.last_seen,
     )
@@ -1169,7 +1171,13 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
                 connection.hostname = hello.hostname
                 connection.platform = hello.platform
                 connection.version = hello.version
-                audit("agent_hello", agent_id=agent_id, hostname=hello.hostname)
+                connection.capabilities = sorted(set(hello.capabilities))
+                audit(
+                    "agent_hello",
+                    agent_id=agent_id,
+                    hostname=hello.hostname,
+                    capability_count=len(connection.capabilities),
+                )
                 continue
 
             if message_type == "heartbeat":

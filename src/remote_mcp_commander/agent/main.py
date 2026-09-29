@@ -8,6 +8,7 @@ import socket
 import websockets
 
 from remote_mcp_commander import __version__
+from remote_mcp_commander.agent.capabilities import detect_capabilities
 from remote_mcp_commander.agent.diagnostics import lookup_port, service_logs, system_health
 from remote_mcp_commander.agent.executor import execute_argv
 from remote_mcp_commander.agent.file_ops import allowed_roots, read_text_file, write_text_file
@@ -82,6 +83,7 @@ async def agent_loop() -> None:
                     hostname=socket.gethostname(),
                     platform=platform.platform(),
                     version=__version__,
+                    capabilities=detect_capabilities(settings, roots),
                 )
                 await websocket.send(hello.model_dump_json())
                 heartbeat_task = asyncio.create_task(heartbeat_loop(websocket, settings.agent_id))

@@ -6,3 +6,4 @@
 - [Read-only diagnostics](read-only-diagnostics.md)
 - [Filesystem discovery](filesystem-discovery.md)
 - [Native deployment](native-deployment.md)
+- [Agent capabilities](agent-capabilities.md)

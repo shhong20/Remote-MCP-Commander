@@ -8,6 +8,9 @@ from pydantic import BaseModel, Field
 AGENT_ID_PATTERN = r"^[A-Za-z0-9_.-]{1,128}$"
 SESSION_ID_PATTERN = r"^[a-f0-9]{32}$"
 CommandArg = Annotated[str, Field(min_length=1, max_length=4096)]
+CapabilityName = Annotated[
+    str, Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_.-]{0,63}$")
+]
 
 
 class CommandRequest(BaseModel):
@@ -43,6 +46,7 @@ class AgentHello(BaseModel):
     hostname: str
     platform: str
     version: str = "unknown"
+    capabilities: list[CapabilityName] = Field(default_factory=list, max_length=64)
 
 
 class Heartbeat(BaseModel):
@@ -59,6 +63,7 @@ class AgentInfo(BaseModel):
     hostname: str | None = None
     platform: str | None = None
     version: str | None = None
+    capabilities: list[CapabilityName] = Field(default_factory=list, max_length=64)
     connected_at: datetime
     last_seen: datetime
 
