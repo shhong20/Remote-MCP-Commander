@@ -9,9 +9,11 @@ from remote_mcp_commander.release import (
     ReleaseError,
     _validate_root,
     activate,
+    main,
     rollback,
     status,
 )
+from remote_mcp_commander.release_integrity import IntegrityError, seal_release
 
 
 def make_release(root: Path, release_id: str) -> Path:
@@ -20,6 +22,12 @@ def make_release(root: Path, release_id: str) -> Path:
     doctor.parent.mkdir(parents=True)
     doctor.write_text("#!/bin/sh\nexit 0\n")
     doctor.chmod(0o755)
+    (release / "pyproject.toml").write_text('[project]\nname="test-release"\nversion="0.16.0"\n')
+    package = release / "src" / "remote_mcp_commander"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text('__version__ = "0.16.0"\n')
+    (package / "protocol.py").write_text("PROTOCOL_MIN_SUPPORTED = 1\nPROTOCOL_MAX_SUPPORTED = 1\n")
+    seal_release(release, commit_sha="a" * 40)
     return release
 
 
@@ -108,3 +116,64 @@ def test_root_symlink_is_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(ReleaseError, match="root must not be a symlink"):
         _validate_root(str(link))
+
+
+def test_status_distinguishes_sealed_candidates(tmp_path: Path) -> None:
+    root = make_root(tmp_path)
+    make_release(root, "sealed")
+    unsealed = root / "releases" / "unsealed"
+    doctor = unsealed / ".venv" / "bin" / "remote-mcp-doctor"
+    doctor.parent.mkdir(parents=True)
+    doctor.write_text("#!/bin/sh\nexit 0\n")
+    doctor.chmod(0o755)
+
+    result = status(root)
+
+    assert result.available == ["sealed", "unsealed"]
+    assert result.sealed == ["sealed"]
+
+
+def test_cli_seal_verify_and_activate(tmp_path: Path, capsys) -> None:
+    root = make_root(tmp_path)
+    release = root / "releases" / "v1"
+    doctor = release / ".venv" / "bin" / "remote-mcp-doctor"
+    doctor.parent.mkdir(parents=True)
+    doctor.write_text("#!/bin/sh\nexit 0\n")
+    doctor.chmod(0o755)
+    (release / "pyproject.toml").write_text('[project]\nname="test-release"\nversion="0.17.0"\n')
+    package = release / "src" / "remote_mcp_commander"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text('__version__ = "0.17.0"\n')
+    (package / "protocol.py").write_text("PROTOCOL_MIN_SUPPORTED = 1\nPROTOCOL_MAX_SUPPORTED = 1\n")
+
+    assert main(["--root", str(root), "seal", "v1", "--commit-sha", "c" * 40]) == 0
+    assert "tree_sha256:" in capsys.readouterr().out
+    assert main(["--root", str(root), "verify", "v1"]) == 0
+    capsys.readouterr()
+    assert main(["--root", str(root), "activate", "v1"]) == 0
+    assert status(root).current == "v1"
+
+
+def test_rollback_rejects_tampered_previous_release(tmp_path: Path) -> None:
+    root = make_root(tmp_path)
+    first = make_release(root, "v1")
+    make_release(root, "v2")
+    activate(root, "v1")
+    activate(root, "v2")
+    (first / "pyproject.toml").chmod(0o600)
+    (first / "pyproject.toml").write_text('[project]\nname="changed"\nversion="0.16.0"\n')
+
+    with pytest.raises(IntegrityError, match="manifest|tree|metadata"):
+        rollback(root)
+
+
+def test_activate_rejects_unsealed_release(tmp_path: Path) -> None:
+    root = make_root(tmp_path)
+    release = root / "releases" / "legacy"
+    doctor = release / ".venv" / "bin" / "remote-mcp-doctor"
+    doctor.parent.mkdir(parents=True)
+    doctor.write_text("#!/bin/sh\nexit 0\n")
+    doctor.chmod(0o755)
+
+    with pytest.raises(IntegrityError, match="manifest"):
+        activate(root, "legacy")

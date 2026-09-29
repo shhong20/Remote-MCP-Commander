@@ -137,7 +137,7 @@ Gateway and MCP run under separate unprivileged `remote-mcp-gateway` and `remote
 
 Use `remote-mcp-doctor gateway|mcp|agent` to validate the effective deployment environment; `--json` is available for automation. The systemd templates run the role-specific doctor as `ExecStartPre`. See `docs/deployment-doctor.md`.
 
-Prepared releases can be switched with `remote-mcp-release --root <deployment-root> activate <release-id>` and reverted with `rollback`. The release manager only performs bounded local symlink switching; it does not download code or restart services. See `docs/release-lifecycle.md`.
+Prepared releases are sealed with an exact-tree SHA-256 manifest, verified before activation, switched through atomic `current`/`previous` symlinks, and can be rolled back only to another sealed release. The release manager never downloads code or restarts services. See `docs/release-lifecycle.md` and `docs/release-integrity.md`.
 
 See `docs/native-deployment.md` and `deploy/`.
 
@@ -185,7 +185,7 @@ The journal is append-only JSONL, bounds tail scans, and centrally redacts sensi
 
 - interactive PTY sessions with a separate approval/policy boundary
 - cryptographic audit chaining, retention, and remote log shipping
-- signed release manifests and release packaging automation
+- signed release manifests, trusted signing keys, and release packaging automation
 - multi-user RBAC and stronger OAuth/OIDC integration
 - signed/versioned policy distribution to Agents
 

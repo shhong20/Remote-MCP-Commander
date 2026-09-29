@@ -59,6 +59,15 @@ def test_agent_template_is_a_user_service_without_privilege_escalation() -> None
     assert "remote-mcp-doctor agent" in unit
 
 
+def test_services_keep_release_tree_bytecode_immutable() -> None:
+    gateway = read("deploy/systemd/remote-mcp-gateway.service")
+    mcp = read("deploy/systemd/remote-mcp-server.service")
+    agent = read("deploy/systemd/remote-mcp-agent.user.service")
+
+    for unit in (gateway, mcp, agent):
+        assert "Environment=PYTHONDONTWRITEBYTECODE=1" in unit
+
+
 def test_gateway_and_mcp_examples_bind_only_to_loopback() -> None:
     gateway = read("deploy/gateway.env.example")
     mcp = read("deploy/mcp.env.example")

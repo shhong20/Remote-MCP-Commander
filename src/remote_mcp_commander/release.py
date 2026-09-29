@@ -9,6 +9,13 @@ from contextlib import contextmanager
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from remote_mcp_commander.release_integrity import (
+    IntegrityError,
+    load_manifest,
+    seal_release,
+    verify_release,
+)
+
 try:
     import fcntl
 except ImportError:  # pragma: no cover - non-POSIX fallback
@@ -24,6 +31,7 @@ class ReleaseStatus:
     current: str | None
     previous: str | None
     available: list[str]
+    sealed: list[str]
 
 
 class ReleaseError(RuntimeError):
@@ -124,6 +132,7 @@ def _release_lock(root: Path) -> Iterator[None]:
 
 def status(root: Path) -> ReleaseStatus:
     available = []
+    sealed = []
     for child in sorted((root / "releases").iterdir(), key=lambda item: item.name):
         if not RELEASE_ID_RE.fullmatch(child.name):
             continue
@@ -132,6 +141,12 @@ def status(root: Path) -> ReleaseStatus:
         except ReleaseError:
             continue
         available.append(child.name)
+        try:
+            load_manifest(child)
+        except IntegrityError:
+            pass
+        else:
+            sealed.append(child.name)
         if len(available) >= 1000:
             break
     return ReleaseStatus(
@@ -139,12 +154,14 @@ def status(root: Path) -> ReleaseStatus:
         _read_release_link(root, "current"),
         _read_release_link(root, "previous"),
         available,
+        sealed,
     )
 
 
 def activate(root: Path, release_id: str) -> ReleaseStatus:
-    _release_dir(root, release_id)
+    candidate = _release_dir(root, release_id)
     with _release_lock(root):
+        verify_release(candidate)
         current = _read_release_link(root, "current")
         if current == release_id:
             return status(root)
@@ -160,6 +177,7 @@ def rollback(root: Path) -> ReleaseStatus:
         previous = _read_release_link(root, "previous")
         if previous is None:
             raise ReleaseError("no previous release is available")
+        verify_release(_release_dir(root, previous))
         _replace_link(root, "current", previous)
         if current is not None:
             _replace_link(root, "previous", current)
@@ -174,6 +192,25 @@ def _print_status(result: ReleaseStatus, *, json_output: bool) -> None:
     print(f"current: {result.current or '-'}")
     print(f"previous: {result.previous or '-'}")
     print("available: " + (", ".join(result.available) or "-"))
+    print("sealed: " + (", ".join(result.sealed) or "-"))
+
+
+def _print_manifest(manifest, *, json_output: bool) -> None:
+    payload = {
+        "release_id": manifest.release_id,
+        "package_version": manifest.package_version,
+        "commit_sha": manifest.commit_sha,
+        "protocol_min": manifest.protocol_min,
+        "protocol_max": manifest.protocol_max,
+        "entry_count": len(manifest.entries),
+        "total_bytes": manifest.total_bytes,
+        "tree_sha256": manifest.tree_sha256,
+    }
+    if json_output:
+        print(json.dumps(payload, sort_keys=True))
+        return
+    for key, value in payload.items():
+        print(f"{key}: {value}")
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -182,6 +219,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--json", action="store_true", dest="json_output")
     subparsers = parser.add_subparsers(dest="action", required=True)
     subparsers.add_parser("status")
+    seal_parser = subparsers.add_parser("seal")
+    seal_parser.add_argument("release_id")
+    seal_parser.add_argument("--commit-sha", required=True)
+    verify_parser = subparsers.add_parser("verify")
+    verify_parser.add_argument("release_id")
     activate_parser = subparsers.add_parser("activate")
     activate_parser.add_argument("release_id")
     subparsers.add_parser("rollback")
@@ -191,11 +233,19 @@ def main(argv: list[str] | None = None) -> int:
         root = _validate_root(args.root)
         if args.action == "status":
             result = status(root)
+        elif args.action == "seal":
+            manifest = seal_release(_release_dir(root, args.release_id), commit_sha=args.commit_sha)
+            _print_manifest(manifest, json_output=args.json_output)
+            return 0
+        elif args.action == "verify":
+            manifest = verify_release(_release_dir(root, args.release_id))
+            _print_manifest(manifest, json_output=args.json_output)
+            return 0
         elif args.action == "activate":
             result = activate(root, args.release_id)
         else:
             result = rollback(root)
-    except (OSError, ReleaseError) as exc:
+    except (OSError, ReleaseError, IntegrityError) as exc:
         if args.json_output:
             print(json.dumps({"ok": False, "error": str(exc)}, sort_keys=True))
         else:

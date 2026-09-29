@@ -94,3 +94,7 @@ Then validate read-only tools such as `system_health`, `lookup_port`, `service_s
 Keep the approval-admin credential outside MCP client configuration. Mutation approvals are intentionally an operator-side action.
 
 For atomic local release selection and rollback, see `release-lifecycle.md`.
+
+## Release integrity
+
+Release trees are sealed with SHA-256 manifests before activation, and the service templates set `PYTHONDONTWRITEBYTECODE=1` so normal startup does not mutate the sealed tree. Keep `.git`, credentials, registry data, audit logs, and other mutable state outside release directories. See `release-integrity.md`.

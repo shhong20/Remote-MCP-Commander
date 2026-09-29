@@ -10,3 +10,4 @@
 - [Deployment doctor](deployment-doctor.md)
 - [Protocol compatibility](protocol-compatibility.md)
 - [Release lifecycle](release-lifecycle.md)
+- [Release integrity](release-integrity.md)
