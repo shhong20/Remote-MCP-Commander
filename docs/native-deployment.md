@@ -26,6 +26,7 @@ Suggested paths:
 ```text
 /opt/remote-mcp-commander/releases/<id>/ application + venv
 /opt/remote-mcp-commander/current -> releases/<id>
+/opt/remote-mcp-commander/trusted-release-keys/  root-managed Ed25519 public keys
 /etc/remote-mcp-commander/gateway.env    Gateway secrets/config, mode 0600
 /etc/remote-mcp-commander/mcp.env        MCP secrets/config, mode 0600
 /var/lib/remote-mcp-commander/           registry and audit journal
@@ -98,3 +99,7 @@ For atomic local release selection and rollback, see `release-lifecycle.md`.
 ## Release integrity
 
 Release trees are sealed with SHA-256 manifests before activation, and the service templates set `PYTHONDONTWRITEBYTECODE=1` so normal startup does not mutate the sealed tree. Keep `.git`, credentials, registry data, audit logs, and other mutable state outside release directories. See `release-integrity.md`.
+
+## Signed activation
+
+Production `activate` and `rollback` verify Ed25519 signatures against the root-level `trusted-release-keys/` directory. Keep private signing keys off the deployment host. Add new public keys before rotation and retain old keys while rollback targets still depend on them. See `release-signing.md`.

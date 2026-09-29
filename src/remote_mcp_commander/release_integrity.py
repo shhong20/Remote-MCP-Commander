@@ -14,6 +14,7 @@ from typing import Literal
 from pydantic import BaseModel, Field, model_validator
 
 MANIFEST_FILENAME = "release-manifest.json"
+SIGNATURE_FILENAME = "release-manifest.sig.json"
 MANIFEST_SCHEMA_VERSION = 1
 MAX_MANIFEST_BYTES = 16 * 1024 * 1024
 MAX_MANIFEST_ENTRIES = 50_000
@@ -43,7 +44,7 @@ class ManifestEntry(BaseModel):
             "\x00" in self.path
             or path.is_absolute()
             or ".." in path.parts
-            or self.path == MANIFEST_FILENAME
+            or self.path in {MANIFEST_FILENAME, SIGNATURE_FILENAME}
         ):
             raise ValueError("manifest entry path must stay inside the release")
         if self.kind == "file":
@@ -188,7 +189,7 @@ def _collect_entries(release_dir: Path) -> tuple[list[ManifestEntry], int]:
         for child in children:
             path = Path(child.path)
             relative = path.relative_to(release_dir).as_posix()
-            if relative == MANIFEST_FILENAME:
+            if relative in {MANIFEST_FILENAME, SIGNATURE_FILENAME}:
                 continue
             if ".git" in Path(relative).parts:
                 raise IntegrityError("release artifacts must not contain .git metadata")
@@ -270,8 +271,11 @@ def seal_release(release_dir: Path, *, commit_sha: str) -> ReleaseManifest:
     if not COMMIT_SHA_RE.fullmatch(commit_sha):
         raise IntegrityError("commit SHA must be 40 or 64 hexadecimal characters")
     manifest_path = _manifest_path(release_dir)
+    signature_path = release_dir / SIGNATURE_FILENAME
     if manifest_path.exists() or manifest_path.is_symlink():
         raise IntegrityError("release manifest already exists")
+    if signature_path.exists() or signature_path.is_symlink():
+        raise IntegrityError("release signature exists before manifest sealing")
     package_version, protocol_min, protocol_max = _candidate_metadata(release_dir)
     entries, total_bytes = _collect_entries(release_dir)
     manifest = ReleaseManifest(

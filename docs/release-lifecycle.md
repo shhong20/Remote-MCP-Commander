@@ -21,6 +21,9 @@ The release CLI never downloads code, installs packages, restarts services, or e
 remote-mcp-release --root /opt/remote-mcp-commander status
 remote-mcp-release --root /opt/remote-mcp-commander \
   seal 2026.09.29-b --commit-sha <exact-git-commit>
+remote-mcp-release --root /opt/remote-mcp-commander verify-integrity 2026.09.29-b
+remote-mcp-release --root /opt/remote-mcp-commander \
+  sign 2026.09.29-b --key-id ops-2026 --private-key /secure/release-signing-private.pem
 remote-mcp-release --root /opt/remote-mcp-commander verify 2026.09.29-b
 remote-mcp-release --root /opt/remote-mcp-commander activate 2026.09.29-b
 remote-mcp-release --root /opt/remote-mcp-commander rollback
@@ -32,7 +35,7 @@ remote-mcp-release --root /opt/remote-mcp-commander rollback
 
 - deployment root and `releases/` must be real directories, not symlinks
 - candidate releases cannot be symlink aliases or escape `releases/`
-- activation and rollback both require a valid exact-tree release manifest
+- activation and rollback both require a valid exact-tree manifest and trusted Ed25519 signature
 - changed, missing, or extra files prevent activation
 - `current` and `previous` must be relative `releases/<id>` links
 - a lock file serializes concurrent activate/rollback operations on POSIX
@@ -43,7 +46,7 @@ The two links are not a filesystem transaction as a pair. Activation verifies th
 
 ## Operational sequence
 
-Seal and verify the candidate, then activate it. After `activate`, restart the intended service normally. Its existing systemd `ExecStartPre=remote-mcp-doctor <role>` validates the selected release environment before the process starts.
+Seal, sign, and verify the candidate, then activate it. After `activate`, restart the intended service normally. Its existing systemd `ExecStartPre=remote-mcp-doctor <role>` validates the selected release environment before the process starts.
 
 If startup or smoke checks fail:
 
@@ -55,4 +58,4 @@ systemctl restart remote-mcp-gateway remote-mcp-server
 
 Before the first upgrade from a legacy unsealed deployment, quiesce and seal the existing current release so it can be used as a verified rollback target. The systemd templates set `PYTHONDONTWRITEBYTECODE=1` so normal Python startup does not create new `__pycache__` content inside a sealed release.
 
-Use the same layout under the Agent user's application directory for user-service deployments. See `release-integrity.md` for the manifest format and trust boundary.
+Use the same layout under the Agent user's application directory for user-service deployments. See `release-integrity.md` and `release-signing.md` for integrity and signing trust boundaries.

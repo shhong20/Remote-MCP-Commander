@@ -26,9 +26,9 @@ The release scan is bounded to 50,000 entries, 8 GiB of regular-file content, an
 
 This boundary protects the release artifact itself. The host Python binary reached through the virtual-environment interpreter symlink remains a host dependency and is outside the release manifest.
 
-## Authenticity limitation
+## Authenticity layer
 
-This manifest provides integrity, not cryptographic provenance. A party that can rewrite both the release tree and manifest can recompute valid SHA-256 values. Signed manifests and a trusted-key policy are a separate follow-up layer.
+The manifest by itself provides integrity, not cryptographic provenance. Production activation therefore adds the Ed25519 signature layer documented in `release-signing.md`. A valid tree manifest without a trusted signature remains untrusted and cannot be activated.
 
 ## Commands
 
@@ -39,10 +39,13 @@ remote-mcp-release --root /opt/remote-mcp-commander \
   seal 2026.09.29-b --commit-sha <exact-git-commit>
 
 remote-mcp-release --root /opt/remote-mcp-commander \
-  verify 2026.09.29-b
+  verify-integrity 2026.09.29-b
 
 remote-mcp-release --root /opt/remote-mcp-commander \
-  activate 2026.09.29-b
+  sign 2026.09.29-b --key-id ops-2026 --private-key /secure/release-signing-private.pem
+
+remote-mcp-release --root /opt/remote-mcp-commander verify 2026.09.29-b
+remote-mcp-release --root /opt/remote-mcp-commander activate 2026.09.29-b
 ```
 
 `activate` performs verification again while holding the release-manager lock. `rollback` likewise verifies `previous` before switching `current` back.
