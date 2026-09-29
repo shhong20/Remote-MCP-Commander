@@ -2,7 +2,11 @@ import pytest
 from fastapi import HTTPException
 
 from remote_mcp_commander.config import Settings
-from remote_mcp_commander.gateway.app import enforce_agent_policy
+from remote_mcp_commander.gateway.app import (
+    enforce_agent_policy,
+    require_approval_admin_token,
+    validate_approval_target,
+)
 
 
 def make_settings(**overrides: str) -> Settings:
@@ -47,3 +51,38 @@ def test_agent_startup_rejects_example_credential() -> None:
     settings = make_settings(agent_token="change-me-agent-token")
     with pytest.raises(ValueError, match="enroll the Agent"):
         settings.validate_agent_security(settings.agent_token)
+
+
+def test_gateway_rejects_shared_control_and_approval_credentials() -> None:
+    settings = make_settings(approval_admin_token="control-token-12345678")
+    with pytest.raises(ValueError, match="must be unique"):
+        settings.validate_gateway_security()
+
+
+def test_gateway_accepts_distinct_approval_admin_credential() -> None:
+    settings = make_settings(approval_admin_token="approval-admin-token-1234")
+    settings.validate_gateway_security()
+
+
+def test_gateway_rejects_unprofiled_generic_execute_even_if_host_policy_allows() -> None:
+    settings = make_settings(agent_policies_json='{"server-01":["systemctl"]}')
+    with pytest.raises(HTTPException) as exc_info:
+        enforce_agent_policy("server-01", ["systemctl", "restart", "demo.service"], settings)
+    assert exc_info.value.status_code == 403
+    assert "no safe generic profile" in str(exc_info.value.detail)
+
+
+def test_approval_admin_is_separate_from_control_auth() -> None:
+    settings = make_settings(approval_admin_token="approval-admin-token-1234")
+    with pytest.raises(HTTPException) as exc_info:
+        require_approval_admin_token(settings, "Bearer control-token-12345678")
+    assert exc_info.value.status_code == 401
+    require_approval_admin_token(settings, "Bearer approval-admin-token-1234")
+
+
+def test_approval_target_is_operation_specific() -> None:
+    validate_approval_target("process.terminate", "pid:123@456789")
+    validate_approval_target("service.restart", "demo.service")
+    with pytest.raises(HTTPException) as exc_info:
+        validate_approval_target("process.terminate", "demo.service")
+    assert exc_info.value.status_code == 422

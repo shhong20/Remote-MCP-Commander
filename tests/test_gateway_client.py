@@ -108,3 +108,55 @@ async def test_file_methods_send_structured_payloads() -> None:
     assert '"content":"xyz"' in write_payload
     assert '"overwrite":true' in write_payload
     assert '"expected_sha256":"' + ("0" * 64) + '"' in write_payload
+
+
+@pytest.mark.asyncio
+async def test_mutation_methods_send_approval_binding() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/processes/terminate"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "term-1",
+                    "pid": 123,
+                    "signal_sent": True,
+                    "exited": True,
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "svc-1",
+                "unit": "demo.service",
+                "action": "restart",
+                "returncode": 0,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    await client.terminate_process(
+        "server-01",
+        123,
+        456789,
+        "approval-1",
+        "approval-secret-value",
+    )
+    await client.service_action(
+        "server-01",
+        "demo.service",
+        "restart",
+        "approval-2",
+        "approval-secret-value",
+    )
+
+    terminate_payload = requests[0].content.decode()
+    service_payload = requests[1].content.decode()
+    assert requests[0].url.path.endswith("/processes/terminate")
+    assert '"expected_create_time_ms":456789' in terminate_payload
+    assert '"approval_id":"approval-1"' in terminate_payload
+    assert requests[1].url.path.endswith("/services/action")
+    assert '"action":"restart"' in service_payload
+    assert '"approval_id":"approval-2"' in service_payload

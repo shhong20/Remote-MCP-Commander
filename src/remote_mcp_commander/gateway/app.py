@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import re
 import secrets
 import uuid
 from dataclasses import dataclass, field
@@ -14,12 +15,16 @@ import uvicorn
 from fastapi import Depends, FastAPI, Header, HTTPException, WebSocket, WebSocketDisconnect, status
 
 from remote_mcp_commander.config import Settings, get_settings
+from remote_mcp_commander.gateway.approvals import ApprovalError, ApprovalStore
 from remote_mcp_commander.gateway.audit import audit
 from remote_mcp_commander.gateway.registry import DeviceRegistry
+from remote_mcp_commander.policy import validate_generic_argv
 from remote_mcp_commander.protocol import (
     AgentHello,
     AgentInfo,
     AgentList,
+    ApprovalCreateBody,
+    ApprovalTicket,
     CommandRequest,
     CommandResult,
     EnrollmentClaimBody,
@@ -39,9 +44,15 @@ from remote_mcp_commander.protocol import (
     ProcessListBody,
     ProcessListRequest,
     ProcessListResult,
+    ProcessTerminateBody,
+    ProcessTerminateRequest,
+    ProcessTerminateResult,
     RegisteredDevice,
     RegisteredDeviceList,
     RevokeResult,
+    ServiceActionBody,
+    ServiceActionRequest,
+    ServiceActionResult,
     ServiceStatusBody,
     ServiceStatusRequest,
     ServiceStatusResult,
@@ -54,6 +65,8 @@ AgentReply = (
     | FileWriteResult
     | ProcessListResult
     | ServiceStatusResult
+    | ProcessTerminateResult
+    | ServiceActionResult
 )
 
 
@@ -79,6 +92,11 @@ def registry_for(path: str) -> DeviceRegistry:
     return DeviceRegistry(Path(path).expanduser())
 
 
+@lru_cache
+def approval_store() -> ApprovalStore:
+    return ApprovalStore()
+
+
 def require_control_token(
     settings: SettingsDep,
     authorization: AuthorizationHeader = None,
@@ -91,7 +109,45 @@ def require_control_token(
         )
 
 
+def require_approval_admin_token(
+    settings: SettingsDep,
+    authorization: AuthorizationHeader = None,
+) -> None:
+    if not settings.approval_admin_token:
+        raise HTTPException(status_code=503, detail="mutation approvals are not configured")
+    expected = f"Bearer {settings.approval_admin_token}"
+    if authorization is None or not secrets.compare_digest(authorization, expected):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="invalid approval token"
+        )
+
+
+def process_approval_target(pid: int, create_time_ms: int) -> str:
+    return f"pid:{pid}@{create_time_ms}"
+
+
+def service_approval_operation(action: str) -> str:
+    return f"service.{action}"
+
+
+PROCESS_APPROVAL_TARGET_RE = re.compile(r"^pid:(?:[2-9]|[1-9][0-9]+)@[1-9][0-9]*$")
+SERVICE_APPROVAL_TARGET_RE = re.compile(r"^[A-Za-z0-9_.@:-]{1,256}$")
+
+
+def validate_approval_target(operation: str, target: str) -> None:
+    if operation == "process.terminate":
+        valid = PROCESS_APPROVAL_TARGET_RE.fullmatch(target) is not None
+    else:
+        valid = SERVICE_APPROVAL_TARGET_RE.fullmatch(target) is not None
+    if not valid:
+        raise HTTPException(status_code=422, detail="invalid approval target for operation")
+
+
 def enforce_agent_policy(agent_id: str, argv: list[str], settings: Settings) -> None:
+    generic_error = validate_generic_argv(argv)
+    if generic_error is not None:
+        audit("command_denied", agent_id=agent_id, executable=Path(argv[0]).name)
+        raise HTTPException(status_code=403, detail=generic_error)
     policy = settings.agent_policies.get(agent_id)
     if policy is None:
         return
@@ -149,6 +205,36 @@ async def agent_auth_source(
     if static_token is not None and secrets.compare_digest(token, static_token):
         return "static"
     return None
+
+
+@app.post(
+    "/api/v1/approvals",
+    dependencies=[Depends(require_approval_admin_token)],
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_approval(body: ApprovalCreateBody, settings: SettingsDep) -> ApprovalTicket:
+    validate_approval_target(body.operation, body.target)
+    grant, approval_secret = await approval_store().issue(
+        agent_id=body.agent_id,
+        operation=body.operation,
+        target=body.target,
+        ttl_s=settings.approval_ttl_s,
+    )
+    audit(
+        "approval_issued",
+        approval_id=grant.approval_id,
+        agent_id=grant.agent_id,
+        operation=grant.operation,
+        expires_at=grant.expires_at.isoformat(),
+    )
+    return ApprovalTicket(
+        approval_id=grant.approval_id,
+        approval_secret=approval_secret,
+        agent_id=grant.agent_id,
+        operation=body.operation,
+        target=grant.target,
+        expires_at=grant.expires_at,
+    )
 
 
 @app.get("/healthz")
@@ -440,6 +526,113 @@ async def get_service_status(
         connection.pending.pop(request_id, None)
 
 
+@app.post(
+    "/api/v1/agents/{agent_id}/processes/terminate",
+    dependencies=[Depends(require_control_token)],
+)
+async def terminate_agent_process(
+    agent_id: str, body: ProcessTerminateBody, settings: SettingsDep
+) -> ProcessTerminateResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    target = process_approval_target(body.pid, body.expected_create_time_ms)
+    try:
+        grant = await approval_store().consume(
+            approval_id=body.approval_id,
+            secret=body.approval_secret,
+            agent_id=agent_id,
+            operation="process.terminate",
+            target=target,
+        )
+    except ApprovalError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    audit(
+        "approval_consumed",
+        approval_id=grant.approval_id,
+        agent_id=agent_id,
+        operation=grant.operation,
+    )
+    try:
+        request = ProcessTerminateRequest(
+            request_id=request_id,
+            pid=body.pid,
+            expected_create_time_ms=body.expected_create_time_ms,
+        )
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, ProcessTerminateResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit("process_terminate", agent_id=agent_id, pid=body.pid, rejected=reply.rejected)
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent process terminate timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/services/action",
+    dependencies=[Depends(require_control_token)],
+)
+async def mutate_agent_service(
+    agent_id: str, body: ServiceActionBody, settings: SettingsDep
+) -> ServiceActionResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    operation = service_approval_operation(body.action)
+    try:
+        grant = await approval_store().consume(
+            approval_id=body.approval_id,
+            secret=body.approval_secret,
+            agent_id=agent_id,
+            operation=operation,
+            target=body.unit,
+        )
+    except ApprovalError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    audit(
+        "approval_consumed",
+        approval_id=grant.approval_id,
+        agent_id=agent_id,
+        operation=grant.operation,
+    )
+    try:
+        request = ServiceActionRequest(
+            request_id=request_id,
+            unit=body.unit,
+            action=body.action,
+        )
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, ServiceActionResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "service_action",
+            agent_id=agent_id,
+            unit=body.unit,
+            action=body.action,
+            returncode=reply.returncode,
+            rejected=reply.rejected,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent service action timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
 @app.websocket("/ws/agent/{agent_id}")
 async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
     settings = get_settings()
@@ -494,6 +687,10 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
                 reply = ProcessListResult.model_validate(payload)
             elif message_type == "service_status_result":
                 reply = ServiceStatusResult.model_validate(payload)
+            elif message_type == "process_terminate_result":
+                reply = ProcessTerminateResult.model_validate(payload)
+            elif message_type == "service_action_result":
+                reply = ServiceActionResult.model_validate(payload)
             else:
                 continue
 

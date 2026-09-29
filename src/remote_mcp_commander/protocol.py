@@ -162,6 +162,7 @@ class FileWriteBody(BaseModel):
 
 class ProcessInfo(BaseModel):
     pid: int
+    create_time_ms: int
     name: str
     username: str | None = None
     status: str | None = None
@@ -210,3 +211,76 @@ class ServiceStatusResult(BaseModel):
 
 class ServiceStatusBody(BaseModel):
     unit: str = Field(min_length=1, max_length=256)
+
+
+MutationOperation = Literal[
+    "process.terminate",
+    "service.start",
+    "service.stop",
+    "service.restart",
+]
+ServiceAction = Literal["start", "stop", "restart"]
+
+
+class ApprovalCreateBody(BaseModel):
+    agent_id: str = Field(pattern=AGENT_ID_PATTERN)
+    operation: MutationOperation
+    target: str = Field(min_length=1, max_length=512)
+
+
+class ApprovalTicket(BaseModel):
+    approval_id: str
+    approval_secret: str
+    agent_id: str
+    operation: MutationOperation
+    target: str
+    expires_at: datetime
+
+
+class ApprovalUse(BaseModel):
+    approval_id: str = Field(min_length=8, max_length=256)
+    approval_secret: str = Field(min_length=16, max_length=512)
+
+
+class ProcessTerminateRequest(BaseModel):
+    type: Literal["process_terminate_request"] = "process_terminate_request"
+    request_id: str
+    pid: int = Field(ge=2)
+    expected_create_time_ms: int = Field(gt=0)
+
+
+class ProcessTerminateResult(BaseModel):
+    type: Literal["process_terminate_result"] = "process_terminate_result"
+    request_id: str
+    pid: int
+    signal_sent: bool = False
+    exited: bool = False
+    rejected: bool = False
+    error: str | None = None
+
+
+class ProcessTerminateBody(ApprovalUse):
+    pid: int = Field(ge=2)
+    expected_create_time_ms: int = Field(gt=0)
+
+
+class ServiceActionRequest(BaseModel):
+    type: Literal["service_action_request"] = "service_action_request"
+    request_id: str
+    unit: str = Field(min_length=1, max_length=256)
+    action: ServiceAction
+
+
+class ServiceActionResult(BaseModel):
+    type: Literal["service_action_result"] = "service_action_result"
+    request_id: str
+    unit: str
+    action: ServiceAction
+    returncode: int | None = None
+    rejected: bool = False
+    error: str | None = None
+
+
+class ServiceActionBody(ApprovalUse):
+    unit: str = Field(min_length=1, max_length=256)
+    action: ServiceAction

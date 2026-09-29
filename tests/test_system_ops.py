@@ -16,6 +16,7 @@ async def test_list_processes_is_bounded_and_omits_sensitive_command_line() -> N
         assert "cmdline" not in payload
         assert "environ" not in payload
         assert process.pid > 0
+        assert process.create_time_ms > 0
 
 
 @pytest.mark.asyncio

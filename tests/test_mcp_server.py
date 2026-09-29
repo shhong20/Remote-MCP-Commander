@@ -31,6 +31,8 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "write_file",
         "list_processes",
         "service_status",
+        "terminate_process",
+        "service_action",
     }
 
 
@@ -59,3 +61,23 @@ def test_streamable_http_builds_with_static_auth() -> None:
     )
     server = build_mcp(settings)
     assert server is not None
+
+
+@pytest.mark.asyncio
+async def test_mutation_tools_require_external_approval_fields() -> None:
+    server = build_mcp(make_settings())
+    async with Client(server) as client:
+        result = await client.list_tools()
+
+    tools = {tool.name: tool for tool in result.tools}
+    assert "create_approval" not in tools
+    terminate_schema = tools["terminate_process"].input_schema
+    assert set(terminate_schema["required"]) == {
+        "agent_id",
+        "pid",
+        "expected_create_time_ms",
+        "approval_id",
+        "approval_secret",
+    }
+    service_schema = tools["service_action"].input_schema
+    assert {"approval_id", "approval_secret"}.issubset(service_schema["required"])
