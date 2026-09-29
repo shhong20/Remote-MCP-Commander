@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import os
 import re
 import shutil
 
@@ -9,6 +10,9 @@ import psutil
 from remote_mcp_commander.protocol import (
     ProcessInfo,
     ProcessListResult,
+    ProcessTerminateResult,
+    ServiceAction,
+    ServiceActionResult,
     ServiceStatusResult,
 )
 
@@ -21,9 +25,11 @@ def _list_processes_sync(request_id: str, limit: int) -> ProcessListResult:
         try:
             info = process.info
             memory = info.get("memory_info")
+            create_time_ms = round(process.create_time() * 1000)
             processes.append(
                 ProcessInfo(
                     pid=int(info["pid"]),
+                    create_time_ms=create_time_ms,
                     name=str(info.get("name") or ""),
                     username=info.get("username"),
                     status=info.get("status"),
@@ -104,6 +110,127 @@ async def service_status(request_id: str, unit: str, timeout_s: float) -> Servic
         active_state=values.get("ActiveState"),
         sub_state=values.get("SubState"),
         unit_file_state=values.get("UnitFileState"),
+        returncode=process.returncode,
+        error=error,
+    )
+
+
+def _terminate_process_sync(
+    request_id: str,
+    pid: int,
+    expected_create_time_ms: int,
+) -> ProcessTerminateResult:
+    if pid == os.getpid():
+        return ProcessTerminateResult(
+            request_id=request_id,
+            pid=pid,
+            rejected=True,
+            error="refusing to terminate the Agent process",
+        )
+    try:
+        process = psutil.Process(pid)
+        actual_create_time_ms = round(process.create_time() * 1000)
+        if actual_create_time_ms != expected_create_time_ms:
+            return ProcessTerminateResult(
+                request_id=request_id,
+                pid=pid,
+                rejected=True,
+                error="process identity changed since approval",
+            )
+        process.terminate()
+        signal_sent = True
+        try:
+            process.wait(timeout=2)
+            exited = True
+        except psutil.TimeoutExpired:
+            exited = False
+        return ProcessTerminateResult(
+            request_id=request_id,
+            pid=pid,
+            signal_sent=signal_sent,
+            exited=exited,
+        )
+    except psutil.NoSuchProcess:
+        return ProcessTerminateResult(
+            request_id=request_id,
+            pid=pid,
+            rejected=True,
+            error="process no longer exists",
+        )
+    except psutil.AccessDenied:
+        return ProcessTerminateResult(
+            request_id=request_id,
+            pid=pid,
+            rejected=True,
+            error="permission denied",
+        )
+
+
+async def terminate_process(
+    request_id: str,
+    pid: int,
+    expected_create_time_ms: int,
+) -> ProcessTerminateResult:
+    return await asyncio.to_thread(
+        _terminate_process_sync,
+        request_id,
+        pid,
+        expected_create_time_ms,
+    )
+
+
+async def service_action(
+    request_id: str,
+    unit: str,
+    action: ServiceAction,
+    timeout_s: float,
+) -> ServiceActionResult:
+    if not SERVICE_UNIT_RE.fullmatch(unit):
+        return ServiceActionResult(
+            request_id=request_id,
+            unit=unit,
+            action=action,
+            rejected=True,
+            error="invalid service unit name",
+        )
+
+    systemctl = shutil.which("systemctl")
+    if systemctl is None:
+        return ServiceActionResult(
+            request_id=request_id,
+            unit=unit,
+            action=action,
+            rejected=True,
+            error="systemctl is not available",
+        )
+
+    process = await asyncio.create_subprocess_exec(
+        systemctl,
+        action,
+        unit,
+        "--no-pager",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        _, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_s)
+    except TimeoutError:
+        process.kill()
+        await process.wait()
+        return ServiceActionResult(
+            request_id=request_id,
+            unit=unit,
+            action=action,
+            error="systemctl action timed out",
+        )
+
+    error = None
+    if process.returncode not in (0, None):
+        error = stderr.decode("utf-8", errors="replace")[:512].strip() or "systemctl action failed"
+    return ServiceActionResult(
+        request_id=request_id,
+        unit=unit,
+        action=action,
         returncode=process.returncode,
         error=error,
     )

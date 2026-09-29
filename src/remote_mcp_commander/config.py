@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import secrets
 import stat
 from functools import lru_cache
 from pathlib import Path
@@ -20,6 +21,8 @@ class Settings(BaseSettings):
     agent_tokens_json: str = "{}"
     agent_policies_json: str = "{}"
     control_token: str = ""
+    approval_admin_token: str = ""
+    approval_ttl_s: int = Field(default=60, ge=15, le=600)
     registry_path: str = "~/.remote-mcp-commander/registry.json"
     enrollment_ttl_s: int = Field(default=300, ge=30, le=3600)
     bind_host: str = "127.0.0.1"
@@ -117,6 +120,16 @@ class Settings(BaseSettings):
     def validate_gateway_security(self) -> None:
         if self._credential_is_unsafe(self.control_token):
             raise ValueError("replace the placeholder Gateway control credential before startup")
+        if self.approval_admin_token:
+            if self._credential_is_unsafe(self.approval_admin_token):
+                raise ValueError("replace the placeholder approval-admin credential before startup")
+            privileged_credentials = [self.control_token, self.mcp_token, self.agent_token]
+            privileged_credentials.extend(self.agent_tokens.values())
+            if any(
+                value and secrets.compare_digest(value, self.approval_admin_token)
+                for value in privileged_credentials
+            ):
+                raise ValueError("approval-admin credential must be unique")
         static_agent_credentials = [
             value for value in [self.agent_token, *self.agent_tokens.values()] if value
         ]

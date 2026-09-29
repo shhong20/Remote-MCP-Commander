@@ -4,6 +4,7 @@ import asyncio
 import os
 from pathlib import Path
 
+from remote_mcp_commander.policy import validate_generic_argv
 from remote_mcp_commander.protocol import CommandResult
 
 
@@ -16,6 +17,9 @@ async def execute_argv(
     max_output_bytes: int,
 ) -> CommandResult:
     executable = Path(argv[0]).name
+    policy_error = validate_generic_argv(argv)
+    if policy_error is not None:
+        return CommandResult(request_id=request_id, rejected=True, error=policy_error)
     if executable not in allowlist:
         return CommandResult(
             request_id=request_id,

@@ -9,7 +9,12 @@ import websockets
 
 from remote_mcp_commander.agent.executor import execute_argv
 from remote_mcp_commander.agent.file_ops import allowed_roots, read_text_file, write_text_file
-from remote_mcp_commander.agent.system_ops import list_processes, service_status
+from remote_mcp_commander.agent.system_ops import (
+    list_processes,
+    service_action,
+    service_status,
+    terminate_process,
+)
 from remote_mcp_commander.config import get_settings
 from remote_mcp_commander.protocol import (
     AgentHello,
@@ -20,6 +25,8 @@ from remote_mcp_commander.protocol import (
     PingRequest,
     PingResult,
     ProcessListRequest,
+    ProcessTerminateRequest,
+    ServiceActionRequest,
     ServiceStatusRequest,
 )
 
@@ -101,6 +108,27 @@ async def agent_loop() -> None:
                             request = ServiceStatusRequest.model_validate(payload)
                             result = await service_status(
                                 request.request_id, request.unit, settings.exec_timeout_s
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "process_terminate_request":
+                            request = ProcessTerminateRequest.model_validate(payload)
+                            result = await terminate_process(
+                                request.request_id,
+                                request.pid,
+                                request.expected_create_time_ms,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "service_action_request":
+                            request = ServiceActionRequest.model_validate(payload)
+                            result = await service_action(
+                                request.request_id,
+                                request.unit,
+                                request.action,
+                                settings.exec_timeout_s,
                             )
                             await websocket.send(result.model_dump_json())
                             continue

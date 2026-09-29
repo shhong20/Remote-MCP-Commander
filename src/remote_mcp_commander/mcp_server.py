@@ -16,6 +16,9 @@ from remote_mcp_commander.protocol import (
     FileWriteResult,
     PingResponse,
     ProcessListResult,
+    ProcessTerminateResult,
+    ServiceAction,
+    ServiceActionResult,
     ServiceStatusResult,
 )
 
@@ -41,7 +44,8 @@ def build_mcp(settings: Settings) -> MCPServer:
     kwargs: dict[str, object] = {
         "instructions": (
             "Operate only devices explicitly requested by the user. "
-            "Execution uses argv arrays and is still subject to gateway and agent policy."
+            "Execution uses argv arrays and is still subject to gateway and agent policy. "
+            "Mutation tools require an externally issued, one-use approval and cannot self-approve."
         )
     }
     if settings.mcp_transport == "streamable-http":
@@ -114,6 +118,36 @@ def build_mcp(settings: Settings) -> MCPServer:
     async def service_status(agent_id: str, unit: str) -> ServiceStatusResult:
         """Read systemd service state using a fixed systemctl show query."""
         return await GatewayClient(settings).service_status(agent_id, unit)
+
+    @server.tool()
+    async def terminate_process(
+        agent_id: str,
+        pid: int,
+        expected_create_time_ms: int,
+        approval_id: str,
+        approval_secret: str,
+    ) -> ProcessTerminateResult:
+        """Send SIGTERM only after consuming an externally issued one-use approval."""
+        return await GatewayClient(settings).terminate_process(
+            agent_id,
+            pid,
+            expected_create_time_ms,
+            approval_id,
+            approval_secret,
+        )
+
+    @server.tool()
+    async def service_action(
+        agent_id: str,
+        unit: str,
+        action: ServiceAction,
+        approval_id: str,
+        approval_secret: str,
+    ) -> ServiceActionResult:
+        """Start, stop, or restart one systemd unit with a matching one-use approval."""
+        return await GatewayClient(settings).service_action(
+            agent_id, unit, action, approval_id, approval_secret
+        )
 
     return server
 

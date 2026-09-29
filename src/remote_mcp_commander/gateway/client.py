@@ -13,6 +13,8 @@ from remote_mcp_commander.protocol import (
     FileWriteResult,
     PingResponse,
     ProcessListResult,
+    ProcessTerminateResult,
+    ServiceActionResult,
     ServiceStatusResult,
 )
 
@@ -130,3 +132,43 @@ class GatewayClient:
             json_body={"unit": unit},
         )
         return ServiceStatusResult.model_validate(payload)
+
+    async def terminate_process(
+        self,
+        agent_id: str,
+        pid: int,
+        expected_create_time_ms: int,
+        approval_id: str,
+        approval_secret: str,
+    ) -> ProcessTerminateResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/processes/terminate",
+            json_body={
+                "pid": pid,
+                "expected_create_time_ms": expected_create_time_ms,
+                "approval_id": approval_id,
+                "approval_secret": approval_secret,
+            },
+        )
+        return ProcessTerminateResult.model_validate(payload)
+
+    async def service_action(
+        self,
+        agent_id: str,
+        unit: str,
+        action: str,
+        approval_id: str,
+        approval_secret: str,
+    ) -> ServiceActionResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/services/action",
+            json_body={
+                "unit": unit,
+                "action": action,
+                "approval_id": approval_id,
+                "approval_secret": approval_secret,
+            },
+        )
+        return ServiceActionResult.model_validate(payload)
