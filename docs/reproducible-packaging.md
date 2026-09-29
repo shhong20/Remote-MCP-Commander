@@ -54,4 +54,4 @@ This proves deterministic packaging under the declared build contract. Trusted p
 
 The runtime virtual environment is deliberately not called reproducible. Dependency resolution, platform wheels, native libraries, and absolute venv paths need a separate locked runtime-input contract. Do not archive an arbitrary `.venv` and treat it as the reproducible artifact.
 
-Package signing authenticates the transport bundle, but dependency-lock/runtime-input metadata is still a separate follow-up before a runtime environment can be treated as reproducible.
+Package signing authenticates the transport bundle. Dependency ranges can now be resolved into an exact wheel-only runtime input set with `remote-mcp-runtime`; see `runtime-input-locks.md`. The final virtual-environment directory is still not claimed to be byte-for-byte reproducible.

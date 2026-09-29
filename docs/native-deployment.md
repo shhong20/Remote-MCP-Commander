@@ -108,3 +108,7 @@ Production `activate` and `rollback` verify Ed25519 signatures against the root-
 ## Trusted package intake
 
 Before a package bundle is used to prepare a host release, run `remote-mcp-package verify-trusted` against the separate package-publication trust store. Package-signing keys and release-signing keys are independent trust domains; use separate key pairs and directories. See `package-publication.md`.
+
+## Runtime wheel inputs
+
+Before constructing a deployment virtual environment, generate or verify a `remote-mcp-runtime` bundle for the trusted package. The runtime lock fixes the CPython/Linux target, exact pip resolver, and every dependency wheel hash, then re-resolves the closure offline. See `runtime-input-locks.md`.
