@@ -29,6 +29,7 @@ Suggested paths:
 /opt/remote-mcp-commander/trusted-release-keys/  root-managed Ed25519 public keys
 /etc/remote-mcp-commander/trusted-package-keys/ package-publication Ed25519 public keys
 /etc/remote-mcp-commander/trusted-runtime-keys/ runtime-publication Ed25519 public keys
+/srv/remote-mcp-artifacts/ immutable content-addressed package/runtime artifact sets
 /etc/remote-mcp-commander/gateway.env    Gateway secrets/config, mode 0600
 /etc/remote-mcp-commander/mcp.env        MCP secrets/config, mode 0600
 /var/lib/remote-mcp-commander/           registry and audit journal
@@ -115,3 +116,7 @@ Before a package bundle is used to prepare a host release, run `remote-mcp-packa
 Before constructing a deployment virtual environment, generate a `remote-mcp-runtime` bundle for the trusted package, sign it with the separate runtime-publication key, and accept it on the host with `verify-trusted`. The runtime lock fixes the CPython/Linux target, exact pip resolver, and every dependency wheel hash, then re-resolves the closure offline.
 
 Package, runtime, and release signing use distinct keys and trust directories. See `runtime-input-locks.md` and `runtime-publication.md`.
+
+## Artifact registry
+
+Publish a verified package/runtime pair with `remote-mcp-artifact publish` and pin the returned artifact ID in deployment automation. Keep both trust directories outside the registry and run `remote-mcp-artifact verify` on the deployment host before constructing a release. See `artifact-registry.md`.
