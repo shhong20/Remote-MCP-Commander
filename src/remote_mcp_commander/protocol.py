@@ -3,7 +3,10 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
+
+PROTOCOL_MIN_SUPPORTED = 1
+PROTOCOL_MAX_SUPPORTED = 1
 
 AGENT_ID_PATTERN = r"^[A-Za-z0-9_.-]{1,128}$"
 SESSION_ID_PATTERN = r"^[a-f0-9]{32}$"
@@ -46,7 +49,15 @@ class AgentHello(BaseModel):
     hostname: str
     platform: str
     version: str = "unknown"
+    protocol_min: int = Field(default=1, ge=1, le=65_535)
+    protocol_max: int = Field(default=1, ge=1, le=65_535)
     capabilities: list[CapabilityName] = Field(default_factory=list, max_length=64)
+
+    @model_validator(mode="after")
+    def validate_protocol_range(self) -> AgentHello:
+        if self.protocol_min > self.protocol_max:
+            raise ValueError("protocol_min must be <= protocol_max")
+        return self
 
 
 class Heartbeat(BaseModel):
@@ -63,6 +74,7 @@ class AgentInfo(BaseModel):
     hostname: str | None = None
     platform: str | None = None
     version: str | None = None
+    protocol_version: int | None = None
     capabilities: list[CapabilityName] = Field(default_factory=list, max_length=64)
     connected_at: datetime
     last_seen: datetime

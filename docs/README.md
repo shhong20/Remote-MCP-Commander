@@ -8,3 +8,4 @@
 - [Native deployment](native-deployment.md)
 - [Agent capabilities](agent-capabilities.md)
 - [Deployment doctor](deployment-doctor.md)
+- [Protocol compatibility](protocol-compatibility.md)
