@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import os
 import shutil
 from pathlib import Path
 
 from remote_mcp_commander.agent.diagnostics import TRUSTED_SYSTEM_PATH
 from remote_mcp_commander.agent.git_ops import TRUSTED_GIT_PATH
+from remote_mcp_commander.agent.pty_ops import resolve_pty_executable
 from remote_mcp_commander.config import Settings
 from remote_mcp_commander.policy import (
     SAFE_GENERIC_EXECUTABLES,
@@ -49,5 +51,11 @@ def detect_capabilities(settings: Settings, roots: list[Path]) -> list[str]:
         for name in configured_safe
     ):
         capabilities.update({"command.execute", "command.session"})
+
+    if os.name == "posix" and any(
+        resolve_pty_executable(name, search_path=TRUSTED_GENERIC_EXEC_PATH) is not None
+        for name in settings.pty_executable_allowlist
+    ):
+        capabilities.add("command.pty")
 
     return sorted(capabilities)

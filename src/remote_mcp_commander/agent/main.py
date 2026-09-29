@@ -14,6 +14,7 @@ from remote_mcp_commander.agent.executor import execute_argv
 from remote_mcp_commander.agent.file_ops import allowed_roots, read_text_file, write_text_file
 from remote_mcp_commander.agent.filesystem_ops import file_info, list_directory, list_file_roots
 from remote_mcp_commander.agent.git_ops import git_status
+from remote_mcp_commander.agent.pty_ops import PtySessionManager
 from remote_mcp_commander.agent.session_ops import CommandSessionManager
 from remote_mcp_commander.agent.system_ops import (
     list_processes,
@@ -44,6 +45,13 @@ from remote_mcp_commander.protocol import (
     PortLookupRequest,
     ProcessListRequest,
     ProcessTerminateRequest,
+    PtySessionCancelRequest,
+    PtySessionDiscardRequest,
+    PtySessionInputRequest,
+    PtySessionOutputRequest,
+    PtySessionResizeRequest,
+    PtySessionStartRequest,
+    PtySessionStatusRequest,
     ServiceActionRequest,
     ServiceLogsRequest,
     ServiceStatusRequest,
@@ -78,6 +86,14 @@ async def agent_loop() -> None:
                     timeout_s=settings.session_timeout_s,
                     max_output_bytes=settings.max_output_bytes,
                     max_active=settings.session_max_active,
+                    history_limit=settings.session_history_limit,
+                )
+                pty_sessions = PtySessionManager(
+                    allowlist=settings.pty_executable_allowlist,
+                    timeout_s=settings.pty_timeout_s,
+                    max_output_bytes=settings.max_output_bytes,
+                    max_input_bytes=settings.pty_input_max_bytes,
+                    max_active=settings.pty_max_active,
                     history_limit=settings.session_history_limit,
                 )
                 hello = AgentHello(
@@ -175,6 +191,72 @@ async def agent_loop() -> None:
                         if message_type == "command_session_discard_request":
                             request = CommandSessionDiscardRequest.model_validate(payload)
                             result = await sessions.discard(request.request_id, request.session_id)
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "pty_session_start_request":
+                            request = PtySessionStartRequest.model_validate(payload)
+                            result = await pty_sessions.start(
+                                request.request_id,
+                                request.session_id,
+                                request.argv,
+                                columns=request.columns,
+                                rows=request.rows,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "pty_session_status_request":
+                            request = PtySessionStatusRequest.model_validate(payload)
+                            result = await pty_sessions.status(
+                                request.request_id, request.session_id
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "pty_session_input_request":
+                            request = PtySessionInputRequest.model_validate(payload)
+                            result = await pty_sessions.input(
+                                request.request_id, request.session_id, request.data
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "pty_session_resize_request":
+                            request = PtySessionResizeRequest.model_validate(payload)
+                            result = await pty_sessions.resize(
+                                request.request_id,
+                                request.session_id,
+                                columns=request.columns,
+                                rows=request.rows,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "pty_session_cancel_request":
+                            request = PtySessionCancelRequest.model_validate(payload)
+                            result = await pty_sessions.cancel(
+                                request.request_id, request.session_id
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "pty_session_output_request":
+                            request = PtySessionOutputRequest.model_validate(payload)
+                            result = await pty_sessions.output(
+                                request.request_id,
+                                request.session_id,
+                                offset=request.offset,
+                                max_chars=request.max_chars,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "pty_session_discard_request":
+                            request = PtySessionDiscardRequest.model_validate(payload)
+                            result = await pty_sessions.discard(
+                                request.request_id, request.session_id
+                            )
                             await websocket.send(result.model_dump_json())
                             continue
 
@@ -280,7 +362,7 @@ async def agent_loop() -> None:
                         await websocket.send(result.model_dump_json())
                 finally:
                     heartbeat_task.cancel()
-                    await sessions.cancel_all()
+                    await asyncio.gather(sessions.cancel_all(), pty_sessions.cancel_all())
                     await asyncio.gather(heartbeat_task, return_exceptions=True)
         except (OSError, websockets.ConnectionClosed):
             await asyncio.sleep(2)

@@ -22,4 +22,6 @@ A capability means the Agent can expose that operation path. It is not a promise
 
 Gateway policy remains authoritative in addition to Agent capability advertisement. Capability discovery never bypasses command allowlists, allowed roots, enrollment authentication, or external mutation approvals.
 
+`command.pty` is advertised only on POSIX when at least one executable in the dedicated PTY Agent allowlist resolves through the fixed trusted path. It does not imply that Gateway PTY policy or an external start approval exists.
+
 Older Agents that omit the field remain compatible and appear with an empty capability list. This allows rolling upgrades without changing the existing WebSocket protocol all at once.

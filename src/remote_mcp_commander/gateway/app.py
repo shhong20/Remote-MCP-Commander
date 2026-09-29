@@ -34,7 +34,11 @@ from remote_mcp_commander.gateway.audit import (
     current_journal,
 )
 from remote_mcp_commander.gateway.registry import DeviceRegistry
-from remote_mcp_commander.policy import validate_generic_argv
+from remote_mcp_commander.policy import (
+    pty_approval_target,
+    validate_generic_argv,
+    validate_pty_argv,
+)
 from remote_mcp_commander.protocol import (
     PROTOCOL_MAX_SUPPORTED,
     PROTOCOL_MIN_SUPPORTED,
@@ -92,6 +96,22 @@ from remote_mcp_commander.protocol import (
     ProcessTerminateBody,
     ProcessTerminateRequest,
     ProcessTerminateResult,
+    PtySessionCancelRequest,
+    PtySessionDiscardRequest,
+    PtySessionDiscardResult,
+    PtySessionInputBody,
+    PtySessionInputRequest,
+    PtySessionInputResult,
+    PtySessionOutput,
+    PtySessionOutputBody,
+    PtySessionOutputRequest,
+    PtySessionResizeBody,
+    PtySessionResizeRequest,
+    PtySessionResizeResult,
+    PtySessionSnapshot,
+    PtySessionStartBody,
+    PtySessionStartRequest,
+    PtySessionStatusRequest,
     RegisteredDevice,
     RegisteredDeviceList,
     RevokeResult,
@@ -123,6 +143,11 @@ AgentReply = (
     | CommandSessionSnapshot
     | CommandSessionOutput
     | CommandSessionDiscardResult
+    | PtySessionSnapshot
+    | PtySessionOutput
+    | PtySessionInputResult
+    | PtySessionResizeResult
+    | PtySessionDiscardResult
     | SystemHealthResult
     | PortLookupResult
     | ServiceLogsResult
@@ -205,6 +230,7 @@ def service_approval_operation(action: str) -> str:
 
 PROCESS_APPROVAL_TARGET_RE = re.compile(r"^pid:(?:[2-9]|[1-9][0-9]+)@[1-9][0-9]*$")
 SERVICE_APPROVAL_TARGET_RE = re.compile(r"^[A-Za-z0-9_.@:-]{1,256}$")
+PTY_APPROVAL_TARGET_RE = re.compile(r"^argv-sha256:[a-f0-9]{64}$")
 COMMAND_SESSION_ID_RE = re.compile(SESSION_ID_PATTERN)
 
 
@@ -216,6 +242,8 @@ def validate_command_session_id(session_id: str) -> None:
 def validate_approval_target(operation: str, target: str) -> None:
     if operation == "process.terminate":
         valid = PROCESS_APPROVAL_TARGET_RE.fullmatch(target) is not None
+    elif operation == "pty.start":
+        valid = PTY_APPROVAL_TARGET_RE.fullmatch(target) is not None
     else:
         valid = SERVICE_APPROVAL_TARGET_RE.fullmatch(target) is not None
     if not valid:
@@ -236,6 +264,29 @@ def enforce_agent_policy(agent_id: str, argv: list[str], settings: Settings) -> 
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"gateway policy denied executable: {executable}",
+        )
+
+
+def enforce_pty_policy(agent_id: str, argv: list[str], settings: Settings) -> None:
+    policy_error = validate_pty_argv(argv)
+    executable = Path(argv[0]).name if argv else ""
+    if policy_error is not None:
+        audit("pty_session_denied", agent_id=agent_id, executable=executable)
+        raise HTTPException(status_code=403, detail=policy_error)
+    policy = settings.pty_agent_policies.get(agent_id)
+    if policy is None or executable not in policy:
+        audit("pty_session_denied", agent_id=agent_id, executable=executable)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"gateway PTY policy denied executable: {executable}",
+        )
+
+
+def require_agent_capability(connection: AgentConnection, capability: str) -> None:
+    if capability not in connection.capabilities:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=f"agent does not advertise capability: {capability}",
         )
 
 
@@ -660,6 +711,308 @@ async def discard_command_session(
         return reply
     except TimeoutError as exc:
         raise HTTPException(status_code=504, detail="agent session discard timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/pty/sessions",
+    dependencies=[Depends(require_control_token)],
+)
+async def start_pty_session(
+    agent_id: str, body: PtySessionStartBody, settings: SettingsDep
+) -> PtySessionSnapshot:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "command.pty")
+    enforce_pty_policy(agent_id, body.argv, settings)
+    target = pty_approval_target(body.argv)
+    try:
+        grant = await approval_store().consume(
+            approval_id=body.approval_id,
+            secret=body.approval_secret,
+            agent_id=agent_id,
+            operation="pty.start",
+            target=target,
+        )
+    except ApprovalError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    request_id = uuid.uuid4().hex
+    session_id = uuid.uuid4().hex
+    audit_required(
+        "approval_consumed",
+        approval_id=grant.approval_id,
+        agent_id=agent_id,
+        operation=grant.operation,
+        target=grant.target,
+    )
+    audit_required(
+        "pty_session_start_requested",
+        agent_id=agent_id,
+        session_id=session_id,
+        executable=Path(body.argv[0]).name,
+        argc=len(body.argv),
+        columns=body.columns,
+        rows=body.rows,
+    )
+    future = pending_request(connection, request_id)
+    try:
+        request = PtySessionStartRequest(
+            request_id=request_id,
+            session_id=session_id,
+            argv=body.argv,
+            columns=body.columns,
+            rows=body.rows,
+        )
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, PtySessionSnapshot):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "pty_session_started",
+            agent_id=agent_id,
+            session_id=session_id,
+            state=reply.state,
+            rejected=reply.rejected,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent PTY start timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.get(
+    "/api/v1/agents/{agent_id}/pty/sessions/{session_id}",
+    dependencies=[Depends(require_control_token)],
+)
+async def get_pty_session(
+    agent_id: str, session_id: str, settings: SettingsDep
+) -> PtySessionSnapshot:
+    validate_command_session_id(session_id)
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "command.pty")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        await connection.websocket.send_text(
+            PtySessionStatusRequest(
+                request_id=request_id, session_id=session_id
+            ).model_dump_json()
+        )
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, PtySessionSnapshot):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent PTY status timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/pty/sessions/{session_id}/input",
+    dependencies=[Depends(require_control_token)],
+)
+async def write_pty_input(
+    agent_id: str,
+    session_id: str,
+    body: PtySessionInputBody,
+    settings: SettingsDep,
+) -> PtySessionInputResult:
+    validate_command_session_id(session_id)
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "command.pty")
+    input_bytes = len(body.data.encode())
+    if input_bytes > settings.pty_input_max_bytes:
+        raise HTTPException(status_code=413, detail="PTY input exceeds byte limit")
+    request_id = uuid.uuid4().hex
+    audit_required(
+        "pty_session_input_requested",
+        agent_id=agent_id,
+        session_id=session_id,
+        input_bytes=input_bytes,
+    )
+    future = pending_request(connection, request_id)
+    try:
+        await connection.websocket.send_text(
+            PtySessionInputRequest(
+                request_id=request_id, session_id=session_id, data=body.data
+            ).model_dump_json()
+        )
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, PtySessionInputResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent PTY input timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/pty/sessions/{session_id}/resize",
+    dependencies=[Depends(require_control_token)],
+)
+async def resize_pty_session(
+    agent_id: str,
+    session_id: str,
+    body: PtySessionResizeBody,
+    settings: SettingsDep,
+) -> PtySessionResizeResult:
+    validate_command_session_id(session_id)
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "command.pty")
+    request_id = uuid.uuid4().hex
+    audit_required(
+        "pty_session_resize_requested",
+        agent_id=agent_id,
+        session_id=session_id,
+        columns=body.columns,
+        rows=body.rows,
+    )
+    future = pending_request(connection, request_id)
+    try:
+        await connection.websocket.send_text(
+            PtySessionResizeRequest(
+                request_id=request_id,
+                session_id=session_id,
+                columns=body.columns,
+                rows=body.rows,
+            ).model_dump_json()
+        )
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, PtySessionResizeResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent PTY resize timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/pty/sessions/{session_id}/output",
+    dependencies=[Depends(require_control_token)],
+)
+async def get_pty_output(
+    agent_id: str,
+    session_id: str,
+    body: PtySessionOutputBody,
+    settings: SettingsDep,
+) -> PtySessionOutput:
+    validate_command_session_id(session_id)
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "command.pty")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        await connection.websocket.send_text(
+            PtySessionOutputRequest(
+                request_id=request_id,
+                session_id=session_id,
+                offset=body.offset,
+                max_chars=body.max_chars,
+            ).model_dump_json()
+        )
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, PtySessionOutput):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent PTY output timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/pty/sessions/{session_id}/cancel",
+    dependencies=[Depends(require_control_token)],
+)
+async def cancel_pty_session(
+    agent_id: str, session_id: str, settings: SettingsDep
+) -> PtySessionSnapshot:
+    validate_command_session_id(session_id)
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "command.pty")
+    request_id = uuid.uuid4().hex
+    audit_required("pty_session_cancel_requested", agent_id=agent_id, session_id=session_id)
+    future = pending_request(connection, request_id)
+    try:
+        await connection.websocket.send_text(
+            PtySessionCancelRequest(
+                request_id=request_id, session_id=session_id
+            ).model_dump_json()
+        )
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, PtySessionSnapshot):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent PTY cancel timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/pty/sessions/{session_id}/discard",
+    dependencies=[Depends(require_control_token)],
+)
+async def discard_pty_session(
+    agent_id: str, session_id: str, settings: SettingsDep
+) -> PtySessionDiscardResult:
+    validate_command_session_id(session_id)
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "command.pty")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        await connection.websocket.send_text(
+            PtySessionDiscardRequest(
+                request_id=request_id, session_id=session_id
+            ).model_dump_json()
+        )
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, PtySessionDiscardResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "pty_session_discarded",
+            agent_id=agent_id,
+            session_id=session_id,
+            discarded=reply.discarded,
+            rejected=reply.rejected,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent PTY discard timed out") from exc
     except ConnectionError as exc:
         raise HTTPException(status_code=503, detail="agent disconnected") from exc
     finally:
@@ -1265,6 +1618,16 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
                 reply = CommandSessionOutput.model_validate(payload)
             elif message_type == "command_session_discard_result":
                 reply = CommandSessionDiscardResult.model_validate(payload)
+            elif message_type == "pty_session_snapshot":
+                reply = PtySessionSnapshot.model_validate(payload)
+            elif message_type == "pty_session_output":
+                reply = PtySessionOutput.model_validate(payload)
+            elif message_type == "pty_session_input_result":
+                reply = PtySessionInputResult.model_validate(payload)
+            elif message_type == "pty_session_resize_result":
+                reply = PtySessionResizeResult.model_validate(payload)
+            elif message_type == "pty_session_discard_result":
+                reply = PtySessionDiscardResult.model_validate(payload)
             elif message_type == "ping_result":
                 reply = PingResult.model_validate(payload)
             elif message_type == "file_root_list_result":
