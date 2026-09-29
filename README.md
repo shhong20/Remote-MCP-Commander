@@ -27,7 +27,7 @@ Agents initiate outbound connections, so controlled hosts do not need inbound SS
 ## Current MVP
 
 - MCP Python SDK v2 tool server
-- `list_devices`, `device_info`, `ping_device`, `execute`, `read_file`, `write_file` MCP tools
+- MCP tools for devices, bounded files, process listing, and read-only service status
 - Streamable HTTP for deployed MCP access; stdio for local MCP clients
 - MCP bearer-token verification for Streamable HTTP
 - Persistent outbound Agent -> Gateway WebSocket
@@ -118,6 +118,8 @@ The current MCP tools are intentionally narrow:
 - `execute(agent_id, argv)` - structured argv execution
 - `read_file(agent_id, path, offset, max_bytes)` - bounded text reads inside configured roots
 - `write_file(agent_id, path, content, overwrite, expected_sha256)` - bounded atomic text writes
+- `list_processes(agent_id, limit)` - bounded process metadata without command lines/environments
+- `service_status(agent_id, unit)` - read-only systemd state via fixed `systemctl show` arguments
 
 `execute` never accepts a shell command string. Gateway policy and Agent policy must both allow the executable. File tools are deny-by-default until `COMMANDER_ALLOWED_ROOTS_JSON` is configured with absolute directories. Paths are canonicalized before access so symlink escapes outside those roots are rejected. Existing files require `overwrite=true` plus the SHA-256 returned by a prior `read_file`, providing optimistic stale-write protection. The current text-file MVP caps files at 1 MiB and does not expose delete, move, recursive directory, or arbitrary binary transfer operations.
 
@@ -145,7 +147,7 @@ curl -H "Authorization: Bearer $COMMANDER_CONTROL_TOKEN" \
 ## Planned next
 
 - bounded file read/write tools
-- process and service management
+- explicit process/service mutation controls with separate approval policy
 - cancellable/persistent terminal sessions
 - persistent audit storage
 - TLS/reverse-proxy deployment templates

@@ -29,6 +29,8 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "execute",
         "read_file",
         "write_file",
+        "list_processes",
+        "service_status",
     }
 
 

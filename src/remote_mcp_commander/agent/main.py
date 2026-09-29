@@ -9,6 +9,7 @@ import websockets
 
 from remote_mcp_commander.agent.executor import execute_argv
 from remote_mcp_commander.agent.file_ops import allowed_roots, read_text_file, write_text_file
+from remote_mcp_commander.agent.system_ops import list_processes, service_status
 from remote_mcp_commander.config import get_settings
 from remote_mcp_commander.protocol import (
     AgentHello,
@@ -18,6 +19,8 @@ from remote_mcp_commander.protocol import (
     Heartbeat,
     PingRequest,
     PingResult,
+    ProcessListRequest,
+    ServiceStatusRequest,
 )
 
 
@@ -84,6 +87,20 @@ async def agent_loop() -> None:
                                 overwrite=request.overwrite,
                                 expected_sha256=request.expected_sha256,
                                 max_file_bytes=settings.file_max_bytes,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "process_list_request":
+                            request = ProcessListRequest.model_validate(payload)
+                            result = await list_processes(request.request_id, request.limit)
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "service_status_request":
+                            request = ServiceStatusRequest.model_validate(payload)
+                            result = await service_status(
+                                request.request_id, request.unit, settings.exec_timeout_s
                             )
                             await websocket.send(result.model_dump_json())
                             continue

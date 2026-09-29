@@ -15,6 +15,8 @@ from remote_mcp_commander.protocol import (
     FileReadResult,
     FileWriteResult,
     PingResponse,
+    ProcessListResult,
+    ServiceStatusResult,
 )
 
 
@@ -102,6 +104,16 @@ def build_mcp(settings: Settings) -> MCPServer:
             overwrite=overwrite,
             expected_sha256=expected_sha256,
         )
+
+    @server.tool()
+    async def list_processes(agent_id: str, limit: int = 100) -> ProcessListResult:
+        """List process metadata without exposing command-line arguments or environments."""
+        return await GatewayClient(settings).list_processes(agent_id, limit=limit)
+
+    @server.tool()
+    async def service_status(agent_id: str, unit: str) -> ServiceStatusResult:
+        """Read systemd service state using a fixed systemctl show query."""
+        return await GatewayClient(settings).service_status(agent_id, unit)
 
     return server
 
