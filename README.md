@@ -38,7 +38,7 @@ Agents initiate outbound connections, so controlled hosts do not need inbound SS
 - `create_subprocess_exec(..., shell=False)` command execution
 - Request/response correlation with request IDs
 - Actual Gateway -> Agent RTT ping
-- Agent metadata, heartbeat, `last_seen`, and runtime capability advertisement
+- Agent metadata, heartbeat, `last_seen`, negotiated protocol version, and runtime capability advertisement
 - Command timeout and bounded stdout/stderr
 - Persistent append-only JSONL audit journal with centralized redaction
 - Native systemd + Caddy TLS deployment templates with startup preflight doctor
@@ -116,6 +116,8 @@ The current MCP tools are intentionally narrow:
 - `service_action(...)` - approval-gated `start`, `stop`, or `restart` for one exact systemd unit
 
 `execute` never accepts a shell command string. It is also limited to fixed safe generic profiles: `echo`, argument-free `hostname`, `whoami`, and `uptime`. Generic execution accepts bare executable names only, resolves them from the fixed trusted search path `/usr/bin:/bin`, and gives the child the same restricted `PATH`. Adding `systemctl`, a shell/interpreter, another executable, or an absolute-path alias to configuration therefore does not bypass the mutation approval path. Gateway policy and Agent policy must both allow the executable.
+
+Protocol compatibility is negotiated during the initial Agent hello. A WebSocket is not promoted into the active device registry until hello identity and protocol-range validation succeed, so an incompatible replacement cannot evict a healthy Agent. Legacy hello messages without protocol fields are treated as protocol v1. See `docs/protocol-compatibility.md`.
 
 Connected Agents advertise a bounded capability set derived from their real local environment (for example files, Git, systemd, journal logs, process inspection, and safe command sessions). `list_devices` and `device_info` include this list so MCP clients can choose supported tools before attempting a call. Capabilities describe an available Agent-side path, not guaranteed OS permission for every target. See `docs/agent-capabilities.md`.
 

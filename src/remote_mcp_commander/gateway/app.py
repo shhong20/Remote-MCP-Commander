@@ -36,6 +36,8 @@ from remote_mcp_commander.gateway.audit import (
 from remote_mcp_commander.gateway.registry import DeviceRegistry
 from remote_mcp_commander.policy import validate_generic_argv
 from remote_mcp_commander.protocol import (
+    PROTOCOL_MAX_SUPPORTED,
+    PROTOCOL_MIN_SUPPORTED,
     SESSION_ID_PATTERN,
     AgentHello,
     AgentInfo,
@@ -77,6 +79,7 @@ from remote_mcp_commander.protocol import (
     GitStatusBody,
     GitStatusRequest,
     GitStatusResult,
+    Heartbeat,
     PingRequest,
     PingResponse,
     PingResult,
@@ -135,6 +138,7 @@ class AgentConnection:
     hostname: str | None = None
     platform: str | None = None
     version: str | None = None
+    protocol_version: int | None = None
     capabilities: list[str] = field(default_factory=list)
     pending: dict[str, asyncio.Future[AgentReply]] = field(default_factory=dict)
 
@@ -241,10 +245,17 @@ def agent_info(agent_id: str, connection: AgentConnection) -> AgentInfo:
         hostname=connection.hostname,
         platform=connection.platform,
         version=connection.version,
+        protocol_version=connection.protocol_version,
         capabilities=connection.capabilities,
         connected_at=connection.connected_at,
         last_seen=connection.last_seen,
     )
+
+
+def negotiate_protocol(protocol_min: int, protocol_max: int) -> int | None:
+    lower = max(PROTOCOL_MIN_SUPPORTED, protocol_min)
+    upper = min(PROTOCOL_MAX_SUPPORTED, protocol_max)
+    return upper if lower <= upper else None
 
 
 def pending_request(connection: AgentConnection, request_id: str) -> asyncio.Future[AgentReply]:
@@ -1149,38 +1160,101 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
         return
 
     await websocket.accept()
-    old = connections.get(agent_id)
-    if old is not None:
-        await old.websocket.close(code=4000, reason="replaced by newer agent connection")
-
     connection = AgentConnection(websocket=websocket)
-    connections[agent_id] = connection
-    audit("agent_connected", agent_id=agent_id, auth_source=auth_source)
+    registered = False
 
     try:
+        try:
+            payload = await asyncio.wait_for(
+                websocket.receive_json(), timeout=settings.request_timeout_s
+            )
+        except TimeoutError:
+            audit("agent_hello_timeout", agent_id=agent_id)
+            await websocket.close(code=4408, reason="hello timeout")
+            return
+        except ValueError:
+            audit("agent_hello_invalid", agent_id=agent_id)
+            await websocket.close(code=4400, reason="invalid hello")
+            return
+        connection.last_seen = datetime.now(UTC)
+        if not isinstance(payload, dict) or payload.get("type") != "hello":
+            audit("agent_hello_required", agent_id=agent_id)
+            await websocket.close(code=4400, reason="hello required")
+            return
+        try:
+            hello = AgentHello.model_validate(payload)
+        except ValueError:
+            audit("agent_hello_invalid", agent_id=agent_id)
+            await websocket.close(code=4400, reason="invalid hello")
+            return
+        if hello.agent_id != agent_id:
+            await websocket.close(code=4403, reason="agent identity mismatch")
+            return
+
+        protocol_version = negotiate_protocol(hello.protocol_min, hello.protocol_max)
+        if protocol_version is None:
+            audit(
+                "agent_protocol_rejected",
+                agent_id=agent_id,
+                agent_protocol_min=hello.protocol_min,
+                agent_protocol_max=hello.protocol_max,
+                gateway_protocol_min=PROTOCOL_MIN_SUPPORTED,
+                gateway_protocol_max=PROTOCOL_MAX_SUPPORTED,
+            )
+            await websocket.close(code=4406, reason="incompatible protocol")
+            return
+
+        connection.hostname = hello.hostname
+        connection.platform = hello.platform
+        connection.version = hello.version
+        connection.protocol_version = protocol_version
+        connection.capabilities = sorted(set(hello.capabilities))
+
+        old = connections.get(agent_id)
+        connections[agent_id] = connection
+        registered = True
+        if old is not None and old is not connection:
+            await old.websocket.close(code=4000, reason="replaced by newer agent connection")
+
+        audit(
+            "agent_connected",
+            agent_id=agent_id,
+            auth_source=auth_source,
+            protocol_version=protocol_version,
+        )
+        audit(
+            "agent_hello",
+            agent_id=agent_id,
+            hostname=hello.hostname,
+            protocol_version=protocol_version,
+            capability_count=len(connection.capabilities),
+        )
+
         while True:
-            payload = await websocket.receive_json()
+            try:
+                payload = await websocket.receive_json()
+            except ValueError:
+                await websocket.close(code=4400, reason="invalid protocol message")
+                return
             connection.last_seen = datetime.now(UTC)
+            if not isinstance(payload, dict):
+                await websocket.close(code=4400, reason="invalid protocol message")
+                return
             message_type = payload.get("type")
 
             if message_type == "hello":
-                hello = AgentHello.model_validate(payload)
-                if hello.agent_id != agent_id:
-                    await websocket.close(code=4403, reason="agent identity mismatch")
-                    return
-                connection.hostname = hello.hostname
-                connection.platform = hello.platform
-                connection.version = hello.version
-                connection.capabilities = sorted(set(hello.capabilities))
-                audit(
-                    "agent_hello",
-                    agent_id=agent_id,
-                    hostname=hello.hostname,
-                    capability_count=len(connection.capabilities),
-                )
-                continue
+                await websocket.close(code=4400, reason="duplicate hello")
+                return
 
             if message_type == "heartbeat":
+                try:
+                    heartbeat = Heartbeat.model_validate(payload)
+                except ValueError:
+                    await websocket.close(code=4400, reason="invalid heartbeat")
+                    return
+                if heartbeat.agent_id != agent_id:
+                    await websocket.close(code=4403, reason="agent identity mismatch")
+                    return
                 continue
 
             if message_type == "command_result":
@@ -1228,12 +1302,13 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
     except WebSocketDisconnect:
         pass
     finally:
-        if connections.get(agent_id) is connection:
+        if registered and connections.get(agent_id) is connection:
             connections.pop(agent_id, None)
         for future in connection.pending.values():
             if not future.done():
                 future.set_exception(ConnectionError("agent disconnected"))
-        audit("agent_disconnected", agent_id=agent_id)
+        if registered:
+            audit("agent_disconnected", agent_id=agent_id)
 
 
 def run() -> None:

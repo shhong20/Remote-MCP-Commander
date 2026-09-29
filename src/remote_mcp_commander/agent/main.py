@@ -23,6 +23,8 @@ from remote_mcp_commander.agent.system_ops import (
 )
 from remote_mcp_commander.config import get_settings
 from remote_mcp_commander.protocol import (
+    PROTOCOL_MAX_SUPPORTED,
+    PROTOCOL_MIN_SUPPORTED,
     AgentHello,
     CommandRequest,
     CommandSessionCancelRequest,
@@ -83,6 +85,8 @@ async def agent_loop() -> None:
                     hostname=socket.gethostname(),
                     platform=platform.platform(),
                     version=__version__,
+                    protocol_min=PROTOCOL_MIN_SUPPORTED,
+                    protocol_max=PROTOCOL_MAX_SUPPORTED,
                     capabilities=detect_capabilities(settings, roots),
                 )
                 await websocket.send(hello.model_dump_json())
