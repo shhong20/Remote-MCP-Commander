@@ -40,7 +40,7 @@ Agents initiate outbound connections, so controlled hosts do not need inbound SS
 - Actual Gateway -> Agent RTT ping
 - Agent metadata, heartbeat, `last_seen`, negotiated protocol version, and runtime capability advertisement
 - Command timeout and bounded stdout/stderr
-- Persistent append-only JSONL audit journal with centralized redaction
+- SHA-256 chained JSONL audit journal with redaction, bounded retention, verification, and optional remote shipping
 - Native systemd + Caddy TLS deployment templates with startup preflight doctor
 - Offline `remote-mcp-doctor` role preflight wired into systemd startup
 - Domain-separated Ed25519 publication signatures for package manifests and runtime locks
@@ -178,7 +178,7 @@ curl -H "Authorization: Bearer $COMMANDER_CONTROL_TOKEN" \
   'http://127.0.0.1:8765/api/v1/audit?limit=100&agent_id=server-01'
 ```
 
-The journal is append-only JSONL, bounds tail scans, and centrally redacts sensitive field names before both logging and persistence. See `docs/persistent-audit.md`.
+Every new journal record carries a chain ID, monotonic sequence, previous hash, and canonical SHA-256 record hash. The Gateway verifies retained history at startup, rotates by configured size, queries across retained files, and can ship the already-redacted chained record to a fixed HTTPS collector. Use `remote-mcp-audit verify <path>` for offline checks or the authenticated `GET /api/v1/audit/verify` endpoint while the Gateway is running. See `docs/persistent-audit.md`.
 
 ## Security principles
 
@@ -195,7 +195,6 @@ The journal is append-only JSONL, bounds tail scans, and centrally redacts sensi
 
 ## Planned next
 
-- cryptographic audit chaining, retention, and remote log shipping
 - multi-user RBAC and stronger OAuth/OIDC integration
 - signed/versioned policy distribution to Agents
 

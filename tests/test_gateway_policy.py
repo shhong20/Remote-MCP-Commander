@@ -67,6 +67,27 @@ def test_gateway_accepts_distinct_approval_admin_credential() -> None:
     settings.validate_gateway_security()
 
 
+def test_remote_audit_security_requires_safe_url_and_distinct_credential() -> None:
+    with pytest.raises(ValueError, match="needs COMMANDER_AUDIT_REMOTE_URL"):
+        make_settings(audit_remote_required="true").validate_gateway_security()
+
+    with pytest.raises(ValueError, match="remote URL must use https"):
+        make_settings(
+            audit_remote_url="http://audit.example.test/events"
+        ).validate_gateway_security()
+
+    with pytest.raises(ValueError, match="remote audit credential must be unique"):
+        make_settings(
+            audit_remote_url="https://audit.example.test/events",
+            audit_remote_token="control-token-12345678",
+        ).validate_gateway_security()
+
+    make_settings(
+        audit_remote_url="http://127.0.0.1:9000/events",
+        audit_remote_token="remote-audit-token-1234",
+    ).validate_gateway_security()
+
+
 def test_gateway_rejects_unprofiled_generic_execute_even_if_host_policy_allows() -> None:
     settings = make_settings(agent_policies_json='{"server-01":["systemctl"]}')
     with pytest.raises(HTTPException) as exc_info:

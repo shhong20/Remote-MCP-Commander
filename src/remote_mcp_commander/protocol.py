@@ -477,6 +477,19 @@ class AuditQueryResult(BaseModel):
     scan_truncated: bool = False
 
 
+class AuditVerificationResult(BaseModel):
+    valid: bool
+    checked_records: int = 0
+    legacy_records: int = 0
+    retained_files: int = 0
+    chain_id: str | None = None
+    first_sequence: int | None = None
+    last_sequence: int | None = None
+    anchor_hash: str | None = None
+    head_hash: str | None = None
+    error: str | None = None
+
+
 CommandSessionState = Literal["running", "completed", "cancelled", "timed_out", "failed"]
 
 

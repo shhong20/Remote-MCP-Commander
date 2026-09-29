@@ -97,6 +97,8 @@ Then validate read-only tools such as `system_health`, `lookup_port`, `service_s
 
 Keep the approval-admin credential outside MCP client configuration. Mutation approvals are intentionally an operator-side action.
 
+If remote audit shipping is enabled, store its dedicated bearer credential only in the Gateway environment file. Do not reuse the Gateway control, approval-admin, MCP, or Agent credentials. Non-loopback collectors must use HTTPS.
+
 For atomic local release selection and rollback, see `release-lifecycle.md`.
 
 ## Release integrity
