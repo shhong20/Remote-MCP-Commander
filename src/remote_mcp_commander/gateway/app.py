@@ -66,9 +66,15 @@ from remote_mcp_commander.protocol import (
     FileWriteBody,
     FileWriteRequest,
     FileWriteResult,
+    GitStatusBody,
+    GitStatusRequest,
+    GitStatusResult,
     PingRequest,
     PingResponse,
     PingResult,
+    PortLookupBody,
+    PortLookupRequest,
+    PortLookupResult,
     ProcessListBody,
     ProcessListRequest,
     ProcessListResult,
@@ -81,9 +87,14 @@ from remote_mcp_commander.protocol import (
     ServiceActionBody,
     ServiceActionRequest,
     ServiceActionResult,
+    ServiceLogsBody,
+    ServiceLogsRequest,
+    ServiceLogsResult,
     ServiceStatusBody,
     ServiceStatusRequest,
     ServiceStatusResult,
+    SystemHealthRequest,
+    SystemHealthResult,
 )
 
 AgentReply = (
@@ -98,6 +109,10 @@ AgentReply = (
     | CommandSessionSnapshot
     | CommandSessionOutput
     | CommandSessionDiscardResult
+    | SystemHealthResult
+    | PortLookupResult
+    | ServiceLogsResult
+    | GitStatusResult
 )
 
 
@@ -661,6 +676,127 @@ async def ping_agent(agent_id: str, settings: SettingsDep) -> PingResponse:
 
 
 @app.post(
+    "/api/v1/agents/{agent_id}/diagnostics/health",
+    dependencies=[Depends(require_control_token)],
+)
+async def get_system_health(agent_id: str, settings: SettingsDep) -> SystemHealthResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = SystemHealthRequest(request_id=request_id)
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, SystemHealthResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent health query timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/diagnostics/port",
+    dependencies=[Depends(require_control_token)],
+)
+async def lookup_agent_port(
+    agent_id: str, body: PortLookupBody, settings: SettingsDep
+) -> PortLookupResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = PortLookupRequest(request_id=request_id, port=body.port)
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, PortLookupResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit("port_lookup", agent_id=agent_id, port=body.port, count=len(reply.listeners))
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent port lookup timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/diagnostics/service-logs",
+    dependencies=[Depends(require_control_token)],
+)
+async def get_agent_service_logs(
+    agent_id: str, body: ServiceLogsBody, settings: SettingsDep
+) -> ServiceLogsResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = ServiceLogsRequest(request_id=request_id, **body.model_dump())
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, ServiceLogsResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "service_logs",
+            agent_id=agent_id,
+            unit=body.unit,
+            lines=body.lines,
+            truncated=reply.truncated,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent service logs timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/diagnostics/git-status",
+    dependencies=[Depends(require_control_token)],
+)
+async def get_agent_git_status(
+    agent_id: str, body: GitStatusBody, settings: SettingsDep
+) -> GitStatusResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = GitStatusRequest(request_id=request_id, path=body.path)
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, GitStatusResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "git_status",
+            agent_id=agent_id,
+            path=body.path,
+            clean=reply.clean,
+            truncated=reply.truncated,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent git status timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
     "/api/v1/agents/{agent_id}/files/read",
     dependencies=[Depends(require_control_token)],
 )
@@ -963,6 +1099,14 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
                 reply = ProcessTerminateResult.model_validate(payload)
             elif message_type == "service_action_result":
                 reply = ServiceActionResult.model_validate(payload)
+            elif message_type == "system_health_result":
+                reply = SystemHealthResult.model_validate(payload)
+            elif message_type == "port_lookup_result":
+                reply = PortLookupResult.model_validate(payload)
+            elif message_type == "service_logs_result":
+                reply = ServiceLogsResult.model_validate(payload)
+            elif message_type == "git_status_result":
+                reply = GitStatusResult.model_validate(payload)
             else:
                 continue
 

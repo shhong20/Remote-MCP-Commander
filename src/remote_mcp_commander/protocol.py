@@ -215,6 +215,107 @@ class ServiceStatusBody(BaseModel):
     unit: str = Field(min_length=1, max_length=256)
 
 
+class SystemHealthRequest(BaseModel):
+    type: Literal["system_health_request"] = "system_health_request"
+    request_id: str
+
+
+class SystemHealthResult(BaseModel):
+    type: Literal["system_health_result"] = "system_health_result"
+    request_id: str
+    boot_time: datetime | None = None
+    uptime_seconds: int | None = None
+    cpu_count: int | None = None
+    cpu_percent: float | None = None
+    load_1m: float | None = None
+    load_5m: float | None = None
+    load_15m: float | None = None
+    memory_total: int | None = None
+    memory_available: int | None = None
+    memory_percent: float | None = None
+    swap_total: int | None = None
+    swap_used: int | None = None
+    swap_percent: float | None = None
+    disk_total: int | None = None
+    disk_free: int | None = None
+    disk_percent: float | None = None
+    rejected: bool = False
+    error: str | None = None
+
+
+class PortListener(BaseModel):
+    local_address: str
+    pid: int | None = None
+    process_name: str | None = None
+
+
+class PortLookupRequest(BaseModel):
+    type: Literal["port_lookup_request"] = "port_lookup_request"
+    request_id: str
+    port: int = Field(ge=1, le=65_535)
+
+
+class PortLookupResult(BaseModel):
+    type: Literal["port_lookup_result"] = "port_lookup_result"
+    request_id: str
+    port: int
+    listeners: list[PortListener] = Field(default_factory=list)
+    truncated: bool = False
+    rejected: bool = False
+    error: str | None = None
+
+
+class PortLookupBody(BaseModel):
+    port: int = Field(ge=1, le=65_535)
+
+
+class ServiceLogsRequest(BaseModel):
+    type: Literal["service_logs_request"] = "service_logs_request"
+    request_id: str
+    unit: str = Field(min_length=1, max_length=256)
+    lines: int = Field(default=100, ge=1, le=500)
+
+
+class ServiceLogsResult(BaseModel):
+    type: Literal["service_logs_result"] = "service_logs_result"
+    request_id: str
+    unit: str
+    text: str = ""
+    returncode: int | None = None
+    truncated: bool = False
+    rejected: bool = False
+    error: str | None = None
+
+
+class ServiceLogsBody(BaseModel):
+    unit: str = Field(min_length=1, max_length=256)
+    lines: int = Field(default=100, ge=1, le=500)
+
+
+class GitStatusRequest(BaseModel):
+    type: Literal["git_status_request"] = "git_status_request"
+    request_id: str
+    path: str = Field(min_length=1, max_length=4096)
+
+
+class GitStatusResult(BaseModel):
+    type: Literal["git_status_result"] = "git_status_result"
+    request_id: str
+    path: str = ""
+    repo_root: str | None = None
+    branch: str | None = None
+    head_oid: str | None = None
+    porcelain: str = ""
+    clean: bool | None = None
+    truncated: bool = False
+    rejected: bool = False
+    error: str | None = None
+
+
+class GitStatusBody(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+
+
 MutationOperation = Literal[
     "process.terminate",
     "service.start",

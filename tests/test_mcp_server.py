@@ -26,6 +26,10 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "list_devices",
         "device_info",
         "ping_device",
+        "system_health",
+        "lookup_port",
+        "service_logs",
+        "git_status",
         "execute",
         "read_file",
         "write_file",
@@ -118,3 +122,17 @@ async def test_command_session_tools_use_structured_contracts() -> None:
         "agent_id",
         "session_id",
     }
+
+
+@pytest.mark.asyncio
+async def test_diagnostic_tools_use_structured_contracts() -> None:
+    server = build_mcp(make_settings())
+    async with Client(server) as client:
+        result = await client.list_tools()
+
+    tools = {tool.name: tool for tool in result.tools}
+    assert set(tools["system_health"].input_schema["required"]) == {"agent_id"}
+    assert set(tools["lookup_port"].input_schema["required"]) == {"agent_id", "port"}
+    assert set(tools["service_logs"].input_schema["required"]) == {"agent_id", "unit"}
+    assert tools["service_logs"].input_schema["properties"]["lines"]["default"] == 100
+    assert set(tools["git_status"].input_schema["required"]) == {"agent_id", "path"}
