@@ -16,3 +16,4 @@
 - [Signed package publication](package-publication.md)
 - [Runtime input locks](runtime-input-locks.md)
 - [Signed runtime-lock publication](runtime-publication.md)
+- [Immutable artifact registry](artifact-registry.md)
