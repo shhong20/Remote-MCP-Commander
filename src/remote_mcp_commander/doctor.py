@@ -100,6 +100,17 @@ def check_mcp(settings: Settings) -> list[CheckResult]:
     ]
     if settings.mcp_transport == "streamable-http":
         results.append(_loopback_bind_check("mcp.bind", settings.mcp_host))
+        results.append(
+            CheckResult(
+                "mcp.authentication",
+                "pass" if settings.mcp_auth_mode == "oauth" else "warn",
+                (
+                    "single-user OAuth configured; run remote-mcp-connect-check after deployment"
+                    if settings.mcp_auth_mode == "oauth"
+                    else "static bearer auth is for token-capable clients, not ChatGPT web linking"
+                ),
+            )
+        )
     else:
         results.append(CheckResult("mcp.bind", "pass", "stdio transport has no network listener"))
     return results

@@ -150,3 +150,13 @@ def test_mcp_doctor_rejects_public_plain_http_bind(capsys) -> None:
     assert exit_code == 1
     assert payload["ok"] is False
     assert payload["failures"] >= 1
+
+
+def test_mcp_doctor_reports_oauth_and_warns_for_static_web_linking() -> None:
+    from test_oauth import oauth_settings
+
+    oauth = check_mcp(oauth_settings(mcp_token=""))
+    assert failures(oauth) == []
+    assert next(item for item in oauth if item.name == "mcp.authentication").status == "pass"
+    static = check_mcp(secure_settings(mcp_transport="streamable-http"))
+    assert next(item for item in static if item.name == "mcp.authentication").status == "warn"

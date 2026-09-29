@@ -134,3 +134,14 @@ def test_systemd_services_run_role_specific_doctor_preflight() -> None:
         ".venv/bin/remote-mcp-doctor agent"
     )
     assert agent_doctor in agent
+
+
+def test_chatgpt_example_requires_single_user_oauth_without_embedded_secrets() -> None:
+    text = read("deploy/mcp-chatgpt.env.example")
+    assert env_value(text, "COMMANDER_MCP_AUTH_MODE") == "oauth"
+    assert env_value(text, "COMMANDER_MCP_TOKEN") == ""
+    assert env_value(text, "COMMANDER_CONTROL_TOKEN") == ""
+    assert env_value(text, "COMMANDER_MCP_OAUTH_SUBJECT") == ""
+    assert env_value(text, "COMMANDER_MCP_HOST") == "127.0.0.1"
+    assert env_value(text, "COMMANDER_MCP_ISSUER_URL").startswith("https://")
+    assert env_value(text, "COMMANDER_MCP_RESOURCE_URL").endswith("/mcp")

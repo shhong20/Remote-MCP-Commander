@@ -2,6 +2,10 @@
 
 The recommended first production topology keeps the Python services on loopback and terminates TLS at Caddy.
 
+For personal ChatGPT web connections, follow `chatgpt-connection.md` and use
+`deploy/mcp-chatgpt.env.example` instead of the static-token MCP environment example.
+ChatGPT OAuth linking is not provided by the legacy static bearer verifier.
+
 ```text
 Internet / ChatGPT MCP client
         |

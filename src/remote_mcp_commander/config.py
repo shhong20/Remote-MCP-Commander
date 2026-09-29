@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import secrets
 import stat
 from functools import lru_cache
@@ -60,6 +61,10 @@ class Settings(BaseSettings):
     mcp_port: int = 8766
     mcp_path: str = "/mcp"
     mcp_token: str = ""
+    mcp_auth_mode: Literal["static", "oauth"] = "static"
+    mcp_oauth_subject: str = ""
+    mcp_oauth_jwks_cache_s: int = Field(default=300, ge=30, le=3600)
+    mcp_oauth_timeout_s: float = Field(default=5.0, ge=0.1, le=30.0)
     mcp_issuer_url: str = "http://127.0.0.1:8766"
     mcp_resource_url: str = "http://127.0.0.1:8766/mcp"
     mcp_client_id: str = "remote-mcp-client"
@@ -72,9 +77,7 @@ class Settings(BaseSettings):
 
     @property
     def pty_executable_allowlist(self) -> set[str]:
-        return {
-            item.strip() for item in self.pty_allowed_executables.split(",") if item.strip()
-        }
+        return {item.strip() for item in self.pty_allowed_executables.split(",") if item.strip()}
 
     @property
     def pty_agent_policies(self) -> dict[str, set[str]]:
@@ -215,7 +218,7 @@ class Settings(BaseSettings):
     def validate_mcp_http_security(self) -> None:
         if self.mcp_transport != "streamable-http":
             return
-        if self._credential_is_unsafe(self.mcp_token):
+        if self.mcp_auth_mode == "static" and self._credential_is_unsafe(self.mcp_token):
             raise ValueError("set a non-placeholder COMMANDER_MCP_TOKEN for Streamable HTTP")
         if self.mcp_host not in {"127.0.0.1", "localhost", "::1"}:
             raise ValueError(
@@ -223,6 +226,27 @@ class Settings(BaseSettings):
             )
         self._require_secure_remote_url(self.mcp_resource_url, "https", "http")
         self._require_secure_remote_url(self.mcp_issuer_url, "https", "http")
+        if self.mcp_auth_mode == "oauth":
+            for value in (self.mcp_issuer_url, self.mcp_resource_url):
+                parsed = urlparse(value)
+                if (
+                    parsed.scheme != "https"
+                    or not parsed.hostname
+                    or parsed.username is not None
+                    or parsed.password is not None
+                    or parsed.query
+                    or parsed.fragment
+                ):
+                    raise ValueError("OAuth issuer/resource must be clean absolute HTTPS URLs")
+            if urlparse(self.mcp_resource_url).path != self.mcp_path:
+                raise ValueError("OAuth resource URL path must match COMMANDER_MCP_PATH")
+            if (
+                not self.mcp_oauth_subject.strip()
+                or self.mcp_oauth_subject != self.mcp_oauth_subject.strip()
+            ):
+                raise ValueError("set COMMANDER_MCP_OAUTH_SUBJECT to the single allowed user ID")
+            if not re.fullmatch(r"[\x21\x23-\x5b\x5d-\x7e]+", self.mcp_scope):
+                raise ValueError("COMMANDER_MCP_SCOPE must be one non-empty OAuth scope")
 
 
 @lru_cache
