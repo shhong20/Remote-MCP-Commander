@@ -12,3 +12,4 @@
 - [Release lifecycle](release-lifecycle.md)
 - [Release integrity](release-integrity.md)
 - [Signed release manifests](release-signing.md)
+- [Reproducible packaging](reproducible-packaging.md)

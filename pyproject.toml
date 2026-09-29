@@ -1,10 +1,10 @@
 [build-system]
-requires = ["setuptools>=80"]
+requires = ["setuptools==84.0.0"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "remote-mcp-commander"
-version = "0.18.0"
+version = "0.19.0"
 description = "Self-hosted outbound-agent remote command bridge for MCP/AI clients"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -26,6 +26,11 @@ dev = [
   "pytest-asyncio>=1.1,<2",
   "ruff>=0.12,<1",
 ]
+packaging = [
+  "build==1.6.1",
+  "setuptools==84.0.0",
+  "wheel==0.48.0",
+]
 
 [project.scripts]
 remote-mcp-gateway = "remote_mcp_commander.gateway.app:run"
@@ -34,6 +39,7 @@ remote-mcp-enroll = "remote_mcp_commander.agent.enroll:run"
 remote-mcp-server = "remote_mcp_commander.mcp_server:run"
 remote-mcp-doctor = "remote_mcp_commander.doctor:run"
 remote-mcp-release = "remote_mcp_commander.release:run"
+remote-mcp-package = "remote_mcp_commander.package:run"
 
 [tool.setuptools.packages.find]
 where = ["src"]
