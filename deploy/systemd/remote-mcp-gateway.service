@@ -4,6 +4,7 @@ Wants=network-online.target
 After=network-online.target
 
 [Service]
+Environment=PYTHONDONTWRITEBYTECODE=1
 Type=simple
 User=remote-mcp-gateway
 Group=remote-mcp-gateway

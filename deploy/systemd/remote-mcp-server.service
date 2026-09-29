@@ -5,6 +5,7 @@ After=network-online.target remote-mcp-gateway.service
 Requires=remote-mcp-gateway.service
 
 [Service]
+Environment=PYTHONDONTWRITEBYTECODE=1
 Type=simple
 User=remote-mcp-server
 Group=remote-mcp-server

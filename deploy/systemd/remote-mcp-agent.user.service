@@ -4,6 +4,7 @@ Wants=network-online.target
 After=network-online.target
 
 [Service]
+Environment=PYTHONDONTWRITEBYTECODE=1
 Type=simple
 EnvironmentFile=%h/.config/remote-mcp-commander/agent.env
 ExecStartPre=%h/.local/share/remote-mcp-commander/current/.venv/bin/remote-mcp-doctor agent
