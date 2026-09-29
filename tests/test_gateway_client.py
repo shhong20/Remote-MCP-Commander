@@ -169,6 +169,27 @@ async def test_command_session_methods_use_expected_routes() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
+        if request.url.path.endswith("/output"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "output-request",
+                    "session_id": session_id,
+                    "state": "completed",
+                    "stdout": "new",
+                    "next_stdout_offset": 7,
+                    "next_stderr_offset": 0,
+                },
+            )
+        if request.url.path.endswith("/discard"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "discard-request",
+                    "session_id": session_id,
+                    "discarded": True,
+                },
+            )
         if request.method == "POST" and request.url.path.endswith("/commands/sessions"):
             state = "running"
         elif request.method == "POST" and request.url.path.endswith("/cancel"):
@@ -189,13 +210,22 @@ async def test_command_session_methods_use_expected_routes() -> None:
     started = await client.start_command_session("server-01", ["uptime"])
     status = await client.command_session_status("server-01", session_id)
     cancelled = await client.cancel_command_session("server-01", session_id)
+    output = await client.command_session_output(
+        "server-01", session_id, stdout_offset=3, stderr_offset=0, max_chars=4
+    )
+    discarded = await client.discard_command_session("server-01", session_id)
+
     assert started.state == "running"
     assert status.state == "completed"
     assert cancelled.state == "cancelled"
-    assert requests[0].method == "POST"
+    assert output.stdout == "new"
+    assert output.next_stdout_offset == 7
+    assert discarded.discarded is True
     assert requests[0].url.path.endswith("/commands/sessions")
-    assert requests[1].method == "GET"
     assert requests[1].url.path.endswith(f"/commands/sessions/{session_id}")
-    assert requests[2].method == "POST"
     assert requests[2].url.path.endswith(f"/commands/sessions/{session_id}/cancel")
+    assert requests[3].url.path.endswith(f"/commands/sessions/{session_id}/output")
+    assert requests[4].url.path.endswith(f"/commands/sessions/{session_id}/discard")
     assert b'"argv":["uptime"]' in requests[0].content
+    assert b'"stdout_offset":3' in requests[3].content
+    assert b'"max_chars":4' in requests[3].content

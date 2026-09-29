@@ -5,8 +5,10 @@ Command sessions provide a cancellable, pollable execution lifecycle without exp
 ## MCP lifecycle
 
 - `start_command(agent_id, argv)` returns a 32-hex `session_id` and an initial snapshot.
-- `command_status(agent_id, session_id)` returns current state and bounded stdout/stderr.
+- `command_status(agent_id, session_id)` returns current state and the currently retained bounded stdout/stderr.
+- `command_output(agent_id, session_id, stdout_offset, stderr_offset, max_chars)` returns only text after the supplied character cursors and returns the next cursors.
 - `cancel_command(agent_id, session_id)` requests graceful termination and escalates to process kill only if the process does not exit within the short cancellation grace period.
+- `discard_command(agent_id, session_id)` removes a terminal session from bounded Agent history; running sessions cannot be discarded.
 
 States are `running`, `completed`, `cancelled`, `timed_out`, or `failed`.
 
@@ -18,7 +20,7 @@ Current safe generic profiles are `echo`, argument-free `hostname`, `whoami`, an
 
 ## Lifetime and limits
 
-Sessions are Agent-connection scoped, not durable jobs. The Agent cancels running sessions when its WebSocket handler tears down. Completed snapshots are retained only in bounded in-memory history for that connection.
+Sessions are Agent-connection scoped, not durable jobs. The Agent cancels running sessions when its WebSocket handler tears down. Stdout and stderr are drained while the command is running, so polling can observe incremental output and subprocess pipes do not wait for process completion. Cursor offsets count Unicode characters in the retained decoded text, while the retention limit itself remains byte-based. Terminal states are assigned only after both output streams finish draining. Completed snapshots are retained only in bounded in-memory history for that connection and may be explicitly discarded.
 
 Configuration:
 

@@ -36,6 +36,8 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "start_command",
         "command_status",
         "cancel_command",
+        "command_output",
+        "discard_command",
     }
 
 
@@ -101,6 +103,18 @@ async def test_command_session_tools_use_structured_contracts() -> None:
         "session_id",
     }
     assert set(tools["cancel_command"].input_schema["required"]) == {
+        "agent_id",
+        "session_id",
+    }
+    assert set(tools["command_output"].input_schema["required"]) == {
+        "agent_id",
+        "session_id",
+    }
+    output_properties = tools["command_output"].input_schema["properties"]
+    assert output_properties["stdout_offset"]["default"] == 0
+    assert output_properties["stderr_offset"]["default"] == 0
+    assert output_properties["max_chars"]["default"] == 8192
+    assert set(tools["discard_command"].input_schema["required"]) == {
         "agent_id",
         "session_id",
     }
