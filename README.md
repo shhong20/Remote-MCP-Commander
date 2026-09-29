@@ -27,7 +27,7 @@ Agents initiate outbound connections, so controlled hosts do not need inbound SS
 ## Current MVP
 
 - MCP Python SDK v2 tool server
-- MCP tools for devices, bounded files, system inspection, and approval-gated mutations
+- MCP tools for devices, bounded files, cancellable command sessions, system inspection, and approval-gated mutations
 - Streamable HTTP for deployed MCP access; stdio for local MCP clients
 - MCP bearer-token verification for Streamable HTTP
 - Persistent outbound Agent -> Gateway WebSocket
@@ -94,6 +94,9 @@ The current MCP tools are intentionally narrow:
 - `device_info(agent_id)` - one device
 - `ping_device(agent_id)` - real Gateway/Agent round-trip latency
 - `execute(agent_id, argv)` - structured argv execution under fixed safe profiles
+- `start_command(agent_id, argv)` - start a connection-scoped cancellable safe-profile command session
+- `command_status(agent_id, session_id)` - read bounded session state/output
+- `cancel_command(agent_id, session_id)` - request TERM, then KILL after a short grace period if needed
 - `read_file(agent_id, path, offset, max_bytes)` - bounded text reads inside configured roots
 - `write_file(agent_id, path, content, overwrite, expected_sha256)` - bounded atomic text writes
 - `list_processes(agent_id, limit)` - bounded process metadata without command lines/environments
@@ -101,7 +104,9 @@ The current MCP tools are intentionally narrow:
 - `terminate_process(...)` - approval-gated process termination with process creation-time identity checking
 - `service_action(...)` - approval-gated `start`, `stop`, or `restart` for one exact systemd unit
 
-`execute` never accepts a shell command string. It is also limited to fixed safe generic profiles: `echo`, argument-free `hostname`, `whoami`, and `uptime`. Adding `systemctl`, a shell/interpreter, or another executable to configuration therefore does not bypass the mutation approval path. Gateway policy and Agent policy must both allow the executable.
+`execute` never accepts a shell command string. It is also limited to fixed safe generic profiles: `echo`, argument-free `hostname`, `whoami`, and `uptime`. Generic execution accepts bare executable names only, resolves them from the fixed trusted search path `/usr/bin:/bin`, and gives the child the same restricted `PATH`. Adding `systemctl`, a shell/interpreter, another executable, or an absolute-path alias to configuration therefore does not bypass the mutation approval path. Gateway policy and Agent policy must both allow the executable.
+
+Command sessions use the exact same generic policy. They persist across MCP calls while the Agent WebSocket connection is alive, return only bounded stdout/stderr, enforce active/history limits and a session timeout, and are cancelled when that connection is torn down. They are not interactive PTYs and do not widen the executable surface. See `docs/command-sessions.md`.
 
 File tools are deny-by-default until `COMMANDER_ALLOWED_ROOTS_JSON` is configured with absolute directories. Paths are canonicalized before access so symlink escapes outside those roots are rejected. Existing files require `overwrite=true` plus the SHA-256 returned by a prior `read_file`, providing optimistic stale-write protection. The current text-file MVP caps files at 1 MiB and does not expose delete, move, recursive directory, or arbitrary binary transfer operations.
 
@@ -145,7 +150,7 @@ The journal is append-only JSONL, bounds tail scans, and centrally redacts sensi
 
 ## Planned next
 
-- cancellable/persistent terminal sessions with explicit policy boundaries
+- interactive PTY sessions with a separate approval/policy boundary
 - cryptographic audit chaining, retention, and remote log shipping
 - TLS/reverse-proxy deployment templates
 - multi-user RBAC and stronger OAuth/OIDC integration

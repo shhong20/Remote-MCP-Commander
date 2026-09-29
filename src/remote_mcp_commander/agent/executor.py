@@ -1,10 +1,13 @@
 from __future__ import annotations
 
 import asyncio
-import os
 from pathlib import Path
 
-from remote_mcp_commander.policy import validate_generic_argv
+from remote_mcp_commander.policy import (
+    TRUSTED_GENERIC_EXEC_PATH,
+    resolve_generic_executable,
+    validate_generic_argv,
+)
 from remote_mcp_commander.protocol import CommandResult
 
 
@@ -15,6 +18,7 @@ async def execute_argv(
     allowlist: set[str],
     timeout_s: float,
     max_output_bytes: int,
+    exec_search_path: str = TRUSTED_GENERIC_EXEC_PATH,
 ) -> CommandResult:
     executable = Path(argv[0]).name
     policy_error = validate_generic_argv(argv)
@@ -26,13 +30,21 @@ async def execute_argv(
             rejected=True,
             error=f"executable not allowed: {executable}",
         )
+    resolved = resolve_generic_executable(executable, search_path=exec_search_path)
+    if resolved is None:
+        return CommandResult(
+            request_id=request_id,
+            rejected=True,
+            error=f"executable not found in trusted path: {executable}",
+        )
 
     try:
         process = await asyncio.create_subprocess_exec(
-            *argv,
+            resolved,
+            *argv[1:],
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env={"PATH": os.environ.get("PATH", "")},
+            env={"PATH": exec_search_path},
         )
         try:
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_s)

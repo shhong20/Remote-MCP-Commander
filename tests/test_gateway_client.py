@@ -160,3 +160,42 @@ async def test_mutation_methods_send_approval_binding() -> None:
     assert requests[1].url.path.endswith("/services/action")
     assert '"action":"restart"' in service_payload
     assert '"approval_id":"approval-2"' in service_payload
+
+
+@pytest.mark.asyncio
+async def test_command_session_methods_use_expected_routes() -> None:
+    requests: list[httpx.Request] = []
+    session_id = "a" * 32
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.method == "POST" and request.url.path.endswith("/commands/sessions"):
+            state = "running"
+        elif request.method == "POST" and request.url.path.endswith("/cancel"):
+            state = "cancelled"
+        else:
+            state = "completed"
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "session-request",
+                "session_id": session_id,
+                "executable": "uptime",
+                "state": state,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    started = await client.start_command_session("server-01", ["uptime"])
+    status = await client.command_session_status("server-01", session_id)
+    cancelled = await client.cancel_command_session("server-01", session_id)
+    assert started.state == "running"
+    assert status.state == "completed"
+    assert cancelled.state == "cancelled"
+    assert requests[0].method == "POST"
+    assert requests[0].url.path.endswith("/commands/sessions")
+    assert requests[1].method == "GET"
+    assert requests[1].url.path.endswith(f"/commands/sessions/{session_id}")
+    assert requests[2].method == "POST"
+    assert requests[2].url.path.endswith(f"/commands/sessions/{session_id}/cancel")
+    assert b'"argv":["uptime"]' in requests[0].content

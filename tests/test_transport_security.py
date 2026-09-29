@@ -47,3 +47,9 @@ def test_remote_mcp_http_requires_https_metadata_urls() -> None:
     )
     with pytest.raises(ValueError, match="https"):
         settings.validate_mcp_http_security()
+
+
+def test_agent_rejects_session_history_smaller_than_active_limit() -> None:
+    settings = make_settings(session_max_active=20, session_history_limit=10)
+    with pytest.raises(ValueError, match="history limit"):
+        settings.validate_agent_security(settings.agent_token)

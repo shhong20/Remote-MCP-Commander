@@ -33,6 +33,9 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "service_status",
         "terminate_process",
         "service_action",
+        "start_command",
+        "command_status",
+        "cancel_command",
     }
 
 
@@ -81,3 +84,23 @@ async def test_mutation_tools_require_external_approval_fields() -> None:
     }
     service_schema = tools["service_action"].input_schema
     assert {"approval_id", "approval_secret"}.issubset(service_schema["required"])
+
+
+@pytest.mark.asyncio
+async def test_command_session_tools_use_structured_contracts() -> None:
+    server = build_mcp(make_settings())
+    async with Client(server) as client:
+        result = await client.list_tools()
+
+    tools = {tool.name: tool for tool in result.tools}
+    start_schema = tools["start_command"].input_schema
+    assert start_schema["properties"]["argv"]["type"] == "array"
+    assert set(start_schema["required"]) == {"agent_id", "argv"}
+    assert set(tools["command_status"].input_schema["required"]) == {
+        "agent_id",
+        "session_id",
+    }
+    assert set(tools["cancel_command"].input_schema["required"]) == {
+        "agent_id",
+        "session_id",
+    }

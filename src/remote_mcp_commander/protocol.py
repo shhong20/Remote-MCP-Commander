@@ -1,17 +1,19 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, Field
 
 AGENT_ID_PATTERN = r"^[A-Za-z0-9_.-]{1,128}$"
+SESSION_ID_PATTERN = r"^[a-f0-9]{32}$"
+CommandArg = Annotated[str, Field(min_length=1, max_length=4096)]
 
 
 class CommandRequest(BaseModel):
     type: Literal["command_request"] = "command_request"
     request_id: str
-    argv: list[str] = Field(min_length=1, max_length=64)
+    argv: list[CommandArg] = Field(min_length=1, max_length=64)
 
 
 class CommandResult(BaseModel):
@@ -40,7 +42,7 @@ class AgentHello(BaseModel):
     agent_id: str
     hostname: str
     platform: str
-    version: str = "0.1.0"
+    version: str = "unknown"
 
 
 class Heartbeat(BaseModel):
@@ -49,7 +51,7 @@ class Heartbeat(BaseModel):
 
 
 class ExecuteBody(BaseModel):
-    argv: list[str] = Field(min_length=1, max_length=64)
+    argv: list[CommandArg] = Field(min_length=1, max_length=64)
 
 
 class AgentInfo(BaseModel):
@@ -289,3 +291,44 @@ class ServiceActionBody(ApprovalUse):
 class AuditQueryResult(BaseModel):
     records: list[dict[str, Any]] = Field(default_factory=list)
     scan_truncated: bool = False
+
+
+CommandSessionState = Literal["running", "completed", "cancelled", "timed_out", "failed"]
+
+
+class CommandSessionStartRequest(BaseModel):
+    type: Literal["command_session_start_request"] = "command_session_start_request"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    argv: list[CommandArg] = Field(min_length=1, max_length=64)
+
+
+class CommandSessionStatusRequest(BaseModel):
+    type: Literal["command_session_status_request"] = "command_session_status_request"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+
+
+class CommandSessionCancelRequest(BaseModel):
+    type: Literal["command_session_cancel_request"] = "command_session_cancel_request"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+
+
+class CommandSessionSnapshot(BaseModel):
+    type: Literal["command_session_snapshot"] = "command_session_snapshot"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    executable: str = ""
+    state: CommandSessionState
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    returncode: int | None = None
+    stdout: str = ""
+    stderr: str = ""
+    rejected: bool = False
+    error: str | None = None
+
+
+class CommandSessionStartBody(BaseModel):
+    argv: list[CommandArg] = Field(min_length=1, max_length=64)
