@@ -5,3 +5,4 @@
 - [Command sessions](command-sessions.md)
 - [Read-only diagnostics](read-only-diagnostics.md)
 - [Filesystem discovery](filesystem-discovery.md)
+- [Native deployment](native-deployment.md)
