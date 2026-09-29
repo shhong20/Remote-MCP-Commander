@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from datetime import datetime
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -284,3 +284,8 @@ class ServiceActionResult(BaseModel):
 class ServiceActionBody(ApprovalUse):
     unit: str = Field(min_length=1, max_length=256)
     action: ServiceAction
+
+
+class AuditQueryResult(BaseModel):
+    records: list[dict[str, Any]] = Field(default_factory=list)
+    scan_truncated: bool = False
