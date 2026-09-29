@@ -41,7 +41,8 @@ Agents initiate outbound connections, so controlled hosts do not need inbound SS
 - Agent metadata, heartbeat, `last_seen`, and runtime capability advertisement
 - Command timeout and bounded stdout/stderr
 - Persistent append-only JSONL audit journal with centralized redaction
-- Native systemd + Caddy TLS deployment templates
+- Native systemd + Caddy TLS deployment templates with startup preflight doctor
+- Offline `remote-mcp-doctor` role preflight wired into systemd startup
 - Ruff + pytest CI
 
 ## Quick start
@@ -132,7 +133,11 @@ For a long-running host deployment, keep Gateway and MCP services bound to `127.
 
 Gateway and MCP run under separate unprivileged `remote-mcp-gateway` and `remote-mcp-server` accounts. Agents should run as the ordinary OS user whose files/processes are intentionally exposed; do not run an Agent as root just to gain visibility. Deployment environment examples intentionally contain no credentials.
 
+Use `remote-mcp-doctor gateway|mcp|agent` to validate the effective deployment environment; `--json` is available for automation. The systemd templates run the role-specific doctor as `ExecStartPre`. See `docs/deployment-doctor.md`.
+
 See `docs/native-deployment.md` and `deploy/`.
+
+Before starting a service manually, run `remote-mcp-doctor gateway`, `remote-mcp-doctor mcp`, or `remote-mcp-doctor agent`. The provided systemd templates run the matching preflight automatically with `ExecStartPre`. Doctor output reports only validation status/details and never prints configured credential values. See `docs/deployment-doctor.md`.
 
 ## Mutation approvals
 

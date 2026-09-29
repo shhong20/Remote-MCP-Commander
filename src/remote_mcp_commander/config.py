@@ -32,7 +32,7 @@ class Settings(BaseSettings):
     bind_port: int = 8765
     request_timeout_s: float = 15.0
 
-    agent_id: str = "server-01"
+    agent_id: str = Field(default="server-01", pattern=r"^[A-Za-z0-9_.-]{1,128}$")
     gateway_ws: str = "ws://127.0.0.1:8765/ws/agent/server-01"
     allowed_executables: str = "echo,hostname,whoami,uptime"
     max_output_bytes: int = Field(default=65_536, ge=1_024, le=262_144)
@@ -125,7 +125,9 @@ class Settings(BaseSettings):
             return
         if parsed.scheme == loopback_scheme and parsed.hostname in loopback_hosts:
             return
-        raise ValueError(f"remote URL must use {secure_scheme}://: {value}")
+        raise ValueError(
+            f"remote URL must use {secure_scheme}://, except loopback may use {loopback_scheme}://"
+        )
 
     def validate_gateway_security(self) -> None:
         if self._credential_is_unsafe(self.control_token):
@@ -152,6 +154,10 @@ class Settings(BaseSettings):
         if self.session_history_limit < self.session_max_active:
             raise ValueError("session history limit must be >= max active sessions")
         self._require_secure_remote_url(self.gateway_ws, "wss", "ws")
+        parsed = urlparse(self.gateway_ws)
+        expected_path = f"/ws/agent/{self.agent_id}"
+        if parsed.path != expected_path or parsed.query or parsed.fragment:
+            raise ValueError("Agent Gateway WebSocket URL does not match configured Agent ID")
 
     def validate_mcp_gateway_security(self) -> None:
         if self._credential_is_unsafe(self.control_token):

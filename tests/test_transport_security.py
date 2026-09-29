@@ -53,3 +53,24 @@ def test_agent_rejects_session_history_smaller_than_active_limit() -> None:
     settings = make_settings(session_max_active=20, session_history_limit=10)
     with pytest.raises(ValueError, match="history limit"):
         settings.validate_agent_security(settings.agent_token)
+
+
+def test_agent_rejects_gateway_path_for_different_agent_id() -> None:
+    settings = make_settings(
+        agent_id="server-02",
+        gateway_ws="wss://gateway.example.test/ws/agent/server-01",
+    )
+    with pytest.raises(ValueError, match="does not match configured Agent ID"):
+        settings.validate_agent_security(settings.agent_token)
+
+
+def test_remote_url_validation_error_does_not_echo_url_userinfo_secret() -> None:
+    secret = "URL_USERINFO_SECRET_12345"
+    settings = make_settings(
+        gateway_ws=f"ws://user:{secret}@gateway.example.test/ws/agent/server-01"
+    )
+
+    with pytest.raises(ValueError) as exc_info:
+        settings.validate_agent_security(settings.agent_token)
+
+    assert secret not in str(exc_info.value)
