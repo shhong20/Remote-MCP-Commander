@@ -28,6 +28,7 @@ BUILD_TOOLCHAIN = {
     "wheel": "0.48.0",
 }
 PACKAGE_MANIFEST = "package-manifest.json"
+PACKAGE_SIGNATURE = "package-manifest.sig.json"
 MAX_SOURCE_ENTRIES = 20_000
 MAX_SOURCE_BYTES = 128 * 1024 * 1024
 MAX_ARTIFACT_BYTES = 512 * 1024 * 1024
@@ -662,7 +663,8 @@ def verify_bundle(bundle: Path) -> PackageManifest:
     manifest = load_package_manifest(bundle)
     expected = {PACKAGE_MANIFEST, *(item.filename for item in manifest.artifacts)}
     actual = {item.name for item in bundle.iterdir()}
-    if actual != expected:
+    allowed_sets = (expected, expected | {PACKAGE_SIGNATURE})
+    if actual not in allowed_sets:
         raise PackagingError("package bundle file set does not match the manifest")
     for record in manifest.artifacts:
         path = bundle / record.filename
@@ -672,7 +674,7 @@ def verify_bundle(bundle: Path) -> PackageManifest:
         digest, size = _sha256_file(path)
         if digest != record.sha256 or size != record.size:
             raise PackagingError(f"package artifact does not match manifest: {record.filename}")
-    if {item.name for item in bundle.iterdir()} != expected:
+    if {item.name for item in bundle.iterdir()} not in allowed_sets:
         raise PackagingError("package bundle changed during verification")
     return manifest
 
@@ -694,7 +696,7 @@ def _print_manifest(manifest: PackageManifest, *, json_output: bool) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Build reproducible Remote MCP Commander artifacts"
+        description="Build, sign, and verify Remote MCP Commander artifacts"
     )
     subparsers = parser.add_subparsers(dest="action", required=True)
     build_parser = subparsers.add_parser("build")
@@ -706,7 +708,23 @@ def main(argv: list[str] | None = None) -> int:
     verify_parser = subparsers.add_parser("verify")
     verify_parser.add_argument("--bundle", required=True)
     verify_parser.add_argument("--json", action="store_true", dest="json_output")
+    sign_parser = subparsers.add_parser("sign")
+    sign_parser.add_argument("--bundle", required=True)
+    sign_parser.add_argument("--key-id", required=True)
+    sign_parser.add_argument("--private-key", required=True)
+    sign_parser.add_argument("--json", action="store_true", dest="json_output")
+    trusted_parser = subparsers.add_parser("verify-trusted")
+    trusted_parser.add_argument("--bundle", required=True)
+    trusted_parser.add_argument("--trusted-keys-dir", required=True)
+    trusted_parser.add_argument("--json", action="store_true", dest="json_output")
     args = parser.parse_args(argv)
+
+    from remote_mcp_commander.package_signing import (
+        PackageSigningError,
+        sign_package_bundle,
+        verify_signed_package_bundle,
+    )
+
     try:
         if args.action == "build":
             manifest = build_bundle(
@@ -715,16 +733,50 @@ def main(argv: list[str] | None = None) -> int:
                 output=Path(args.output),
                 builder_python=args.builder_python,
             )
-        else:
+            _print_manifest(manifest, json_output=args.json_output)
+            return 0
+        if args.action == "verify":
             manifest = verify_bundle(Path(args.bundle))
-    except PackagingError as exc:
+            _print_manifest(manifest, json_output=args.json_output)
+            return 0
+        if args.action == "sign":
+            signature = sign_package_bundle(
+                Path(args.bundle),
+                key_id=args.key_id,
+                private_key_path=Path(args.private_key),
+            )
+            payload = signature.model_dump(mode="json")
+            if args.json_output:
+                print(json.dumps(payload, sort_keys=True))
+            else:
+                print(f"signed package manifest with key: {signature.key_id}")
+                print(f"manifest_sha256: {signature.manifest_sha256}")
+            return 0
+
+        manifest, signature = verify_signed_package_bundle(
+            Path(args.bundle),
+            trusted_keys_dir=Path(args.trusted_keys_dir),
+        )
         if args.json_output:
+            print(
+                json.dumps(
+                    {
+                        "manifest": manifest.model_dump(mode="json"),
+                        "signature": signature.model_dump(mode="json"),
+                    },
+                    sort_keys=True,
+                )
+            )
+        else:
+            print(f"trusted package: {manifest.commit_sha}")
+            print(f"signing_key: {signature.key_id}")
+        return 0
+    except (PackagingError, PackageSigningError) as exc:
+        if getattr(args, "json_output", False):
             print(json.dumps({"ok": False, "error": str(exc)}, sort_keys=True))
         else:
             print(f"package error: {exc}")
         return 1
-    _print_manifest(manifest, json_output=args.json_output)
-    return 0
 
 
 def run() -> None:

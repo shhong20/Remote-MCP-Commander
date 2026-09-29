@@ -50,8 +50,8 @@ Two independent source directories are then materialized from the same Git blobs
 
 ## Trust boundary
 
-This proves deterministic packaging under the declared build contract; it is not yet an artifact-publication trust anchor. `package-manifest.json` is currently unsigned. The deployed release still receives the existing exact-tree release manifest and trusted Ed25519 signature before activation.
+This proves deterministic packaging under the declared build contract. Trusted publication adds a domain-separated Ed25519 signature over the exact `package-manifest.json` bytes; see `package-publication.md`. The deployed release still receives its separate exact-tree release manifest and trusted release signature before activation.
 
 The runtime virtual environment is deliberately not called reproducible. Dependency resolution, platform wheels, native libraries, and absolute venv paths need a separate locked runtime-input contract. Do not archive an arbitrary `.venv` and treat it as the reproducible artifact.
 
-A follow-up publication layer can sign the package manifest and bind dependency-lock/runtime-input metadata before artifacts are distributed to hosts.
+Package signing authenticates the transport bundle, but dependency-lock/runtime-input metadata is still a separate follow-up before a runtime environment can be treated as reproducible.

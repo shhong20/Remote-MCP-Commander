@@ -13,3 +13,4 @@
 - [Release integrity](release-integrity.md)
 - [Signed release manifests](release-signing.md)
 - [Reproducible packaging](reproducible-packaging.md)
+- [Signed package publication](package-publication.md)
