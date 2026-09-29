@@ -55,4 +55,4 @@ Add a new package public key before publishing artifacts with the new key ID. Re
 
 Removing `<key-id>.pem` immediately revokes package bundles signed only by that key. This affects package publication trust only; release activation trust is independently controlled by `trusted-release-keys/`.
 
-The package signing layer authenticates artifact publication. It does not make the runtime virtual environment reproducible; dependency/runtime locking remains a separate step.
+The package signing layer authenticates artifact publication. `remote-mcp-runtime` can bind that trusted package to an exact wheel-only dependency closure; see `runtime-input-locks.md`. Runtime-lock authenticity is intentionally a separate follow-up trust layer.

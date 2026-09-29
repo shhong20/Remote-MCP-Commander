@@ -14,3 +14,4 @@
 - [Signed release manifests](release-signing.md)
 - [Reproducible packaging](reproducible-packaging.md)
 - [Signed package publication](package-publication.md)
+- [Runtime input locks](runtime-input-locks.md)
