@@ -6,6 +6,7 @@ After=network-online.target
 [Service]
 Type=simple
 EnvironmentFile=%h/.config/remote-mcp-commander/agent.env
+ExecStartPre=%h/.local/share/remote-mcp-commander/current/.venv/bin/remote-mcp-doctor agent
 ExecStart=%h/.local/share/remote-mcp-commander/current/.venv/bin/remote-mcp-agent
 Restart=always
 RestartSec=3s

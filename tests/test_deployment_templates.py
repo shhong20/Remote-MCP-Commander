@@ -29,6 +29,7 @@ def test_gateway_systemd_service_is_unprivileged_and_hardened() -> None:
     assert "ProcSubset=pid" in unit
     assert "CapabilityBoundingSet=" in unit
     assert "ReadWritePaths=/var/lib/remote-mcp-commander" in unit
+    assert "remote-mcp-doctor gateway" in unit
 
 
 def test_mcp_systemd_service_is_unprivileged_and_depends_on_gateway() -> None:
@@ -43,6 +44,7 @@ def test_mcp_systemd_service_is_unprivileged_and_depends_on_gateway() -> None:
     assert "ProtectProc=invisible" in unit
     assert "ProcSubset=pid" in unit
     assert "CapabilityBoundingSet=" in unit
+    assert "remote-mcp-doctor mcp" in unit
 
 
 def test_agent_template_is_a_user_service_without_privilege_escalation() -> None:
@@ -54,6 +56,7 @@ def test_agent_template_is_a_user_service_without_privilege_escalation() -> None
     assert "NoNewPrivileges=true" in unit
     assert "RestrictSUIDSGID=true" in unit
     assert "WantedBy=default.target" in unit
+    assert "remote-mcp-doctor agent" in unit
 
 
 def test_gateway_and_mcp_examples_bind_only_to_loopback() -> None:
@@ -105,3 +108,20 @@ def test_agent_example_requires_wss_and_explicit_allowed_roots() -> None:
     roots = env_value(agent, "COMMANDER_ALLOWED_ROOTS_JSON")
     assert roots.startswith("[") and roots.endswith("]")
     assert roots != "[]"
+
+
+def test_systemd_services_run_role_specific_doctor_preflight() -> None:
+    gateway = read("deploy/systemd/remote-mcp-gateway.service")
+    mcp = read("deploy/systemd/remote-mcp-server.service")
+    agent = read("deploy/systemd/remote-mcp-agent.user.service")
+
+    assert (
+        "ExecStartPre=/opt/remote-mcp-commander/current/.venv/bin/remote-mcp-doctor gateway"
+        in gateway
+    )
+    assert "ExecStartPre=/opt/remote-mcp-commander/current/.venv/bin/remote-mcp-doctor mcp" in mcp
+    agent_doctor = (
+        "ExecStartPre=%h/.local/share/remote-mcp-commander/current/"
+        ".venv/bin/remote-mcp-doctor agent"
+    )
+    assert agent_doctor in agent

@@ -10,6 +10,7 @@ User=remote-mcp-server
 Group=remote-mcp-server
 WorkingDirectory=/opt/remote-mcp-commander/current
 EnvironmentFile=/etc/remote-mcp-commander/mcp.env
+ExecStartPre=/opt/remote-mcp-commander/current/.venv/bin/remote-mcp-doctor mcp
 ExecStart=/opt/remote-mcp-commander/current/.venv/bin/remote-mcp-server
 Restart=on-failure
 RestartSec=3s

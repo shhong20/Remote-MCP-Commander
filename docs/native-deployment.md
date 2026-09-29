@@ -34,6 +34,8 @@ Create the two service accounts and state/config directories with normal OS admi
 
 Install the project into a virtual environment under `/opt/remote-mcp-commander/current/.venv`. Copy the two system service templates from `deploy/systemd/`, and copy/edit the environment examples from `deploy/`.
 
+The packaged systemd services run `remote-mcp-doctor gateway` and `remote-mcp-doctor mcp` as `ExecStartPre` checks. Run the same commands manually after editing environment files; a failing check exits non-zero and prevents service startup.
+
 Generate independent credentials, for example with a cryptographically secure system tool such as `openssl rand -hex 32`. Never reuse the control, approval-admin, MCP, or Agent credentials.
 
 ## TLS reverse proxy
@@ -58,6 +60,8 @@ Copy `deploy/agent.env.example` to `~/.config/remote-mcp-commander/agent.env`, s
 
 Create the one-time enrollment code through the authenticated Gateway control API, then run `remote-mcp-enroll` as the same OS user that will run the Agent. The issued long-lived Agent credential stays in that user's owner-only token file.
 
+Before enabling the Agent service, run `remote-mcp-doctor agent` as that same OS user. It validates the credential, exact Agent-ID/WebSocket URL binding, allowed roots, and reports detected runtime capabilities.
+
 After enrollment:
 
 ```bash
@@ -67,6 +71,18 @@ systemctl --user status remote-mcp-agent.service
 ```
 
 If the Agent must remain connected after the user's interactive logout, enable user lingering according to your OS policy. This does not grant root privileges; it only keeps the user's systemd manager running.
+
+## Preflight
+
+Run the matching offline doctor after writing each environment file:
+
+```bash
+remote-mcp-doctor gateway
+remote-mcp-doctor mcp
+remote-mcp-doctor agent
+```
+
+The bundled systemd units run the same checks automatically with `ExecStartPre`.
 
 ## Operational checks
 

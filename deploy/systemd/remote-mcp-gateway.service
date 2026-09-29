@@ -9,6 +9,7 @@ User=remote-mcp-gateway
 Group=remote-mcp-gateway
 WorkingDirectory=/opt/remote-mcp-commander/current
 EnvironmentFile=/etc/remote-mcp-commander/gateway.env
+ExecStartPre=/opt/remote-mcp-commander/current/.venv/bin/remote-mcp-doctor gateway
 ExecStart=/opt/remote-mcp-commander/current/.venv/bin/remote-mcp-gateway
 Restart=on-failure
 RestartSec=3s
