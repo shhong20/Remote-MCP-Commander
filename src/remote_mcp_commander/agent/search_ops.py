@@ -38,8 +38,8 @@ def _search_sync(
         truncated = False
         for current, dirs, files in os.walk(root, followlinks=False):
             current_path = Path(current)
-            dirs[:] = [name for name in dirs if not (current_path / name).is_symlink()]
-            for name in files:
+            dirs[:] = sorted(name for name in dirs if not (current_path / name).is_symlink())
+            for name in sorted(files):
                 if scanned >= MAX_SCAN_FILES:
                     truncated = True
                     break

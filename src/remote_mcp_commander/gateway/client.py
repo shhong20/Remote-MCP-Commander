@@ -19,6 +19,8 @@ from remote_mcp_commander.protocol import (
     FileReadResult,
     FileRootListResult,
     FileSearchResult,
+    FileSearchSessionPage,
+    FileSearchSessionStopResult,
     FileWriteResult,
     GitStatusResult,
     PathMutationResult,
@@ -407,6 +409,52 @@ class GatewayClient:
             },
         )
         return FileSearchResult.model_validate(payload)
+
+    async def start_search_session(
+        self,
+        agent_id: str,
+        root: str,
+        query: str,
+        *,
+        mode: str = "files",
+        file_glob: str | None = None,
+        case_sensitive: bool = False,
+        page_size: int = 50,
+        max_results: int = 1000,
+    ) -> FileSearchSessionPage:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/files/search/sessions",
+            json_body={
+                "root": root,
+                "query": query,
+                "mode": mode,
+                "file_glob": file_glob,
+                "case_sensitive": case_sensitive,
+                "page_size": page_size,
+                "max_results": max_results,
+            },
+        )
+        return FileSearchSessionPage.model_validate(payload)
+
+    async def more_search_session(
+        self, agent_id: str, session_id: str, *, limit: int = 50
+    ) -> FileSearchSessionPage:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/files/search/sessions/{session_id}/more",
+            json_body={"limit": limit},
+        )
+        return FileSearchSessionPage.model_validate(payload)
+
+    async def stop_search_session(
+        self, agent_id: str, session_id: str
+    ) -> FileSearchSessionStopResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/files/search/sessions/{session_id}/stop",
+        )
+        return FileSearchSessionStopResult.model_validate(payload)
 
     async def mutate_path(
         self,
