@@ -19,6 +19,7 @@ BASE_CAPABILITIES = {
     "diagnostics.port_lookup",
     "process.list",
     "process.terminate",
+    "process.signal",
 }
 
 

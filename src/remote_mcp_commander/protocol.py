@@ -655,6 +655,10 @@ class GitStatusBody(BaseModel):
 
 MutationOperation = Literal[
     "process.terminate",
+    "process.signal.term",
+    "process.signal.kill",
+    "process.signal.int",
+    "process.signal.hup",
     "service.start",
     "service.stop",
     "service.restart",
@@ -702,6 +706,36 @@ class ProcessTerminateResult(BaseModel):
 class ProcessTerminateBody(ApprovalUse):
     pid: int = Field(ge=2)
     expected_create_time_ms: int = Field(gt=0)
+
+
+ProcessSignal = Literal["term", "kill", "int", "hup"]
+
+
+class ProcessSignalRequest(BaseModel):
+    type: Literal["process_signal_request"] = "process_signal_request"
+    request_id: str
+    pid: int = Field(ge=2)
+    expected_create_time_ms: int = Field(gt=0)
+    signal: ProcessSignal
+
+
+class ProcessSignalResult(BaseModel):
+    type: Literal["process_signal_result"] = "process_signal_result"
+    request_id: str
+    pid: int
+    signal: ProcessSignal
+    signal_sent: bool = False
+    exited: bool = False
+    rejected: bool = False
+    error: str | None = None
+
+
+class ProcessSignalBody(BaseModel):
+    pid: int = Field(ge=2)
+    expected_create_time_ms: int = Field(gt=0)
+    signal: ProcessSignal
+    approval_id: str | None = Field(default=None, min_length=8, max_length=256)
+    approval_secret: str | None = Field(default=None, min_length=16, max_length=512)
 
 
 class ServiceActionRequest(BaseModel):

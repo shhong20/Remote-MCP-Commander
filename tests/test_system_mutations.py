@@ -9,12 +9,16 @@ class FakeProcess:
     def __init__(self, create_time: float) -> None:
         self._create_time = create_time
         self.terminated = False
+        self.sent_signal = None
 
     def create_time(self) -> float:
         return self._create_time
 
     def terminate(self) -> None:
         self.terminated = True
+
+    def send_signal(self, value) -> None:
+        self.sent_signal = value
 
     def wait(self, timeout: float) -> None:
         assert timeout == 2
@@ -78,3 +82,22 @@ async def test_service_action_uses_fixed_argv(
     )
     assert result.returncode == 0
     assert args_file.read_text().splitlines() == ["restart", "demo.service", "--no-pager"]
+
+
+@pytest.mark.asyncio
+async def test_signal_process_rechecks_identity_and_sends_requested_signal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    process = FakeProcess(123.456)
+    monkeypatch.setattr(system_ops.psutil, "Process", lambda pid: process)
+
+    stale = await system_ops.signal_process("signal-stale", 99, 999999, "kill")
+    assert stale.rejected is True
+    assert process.sent_signal is None
+
+    result = await system_ops.signal_process("signal-kill", 99, 123456, "kill")
+    assert result.rejected is False
+    assert result.signal == "kill"
+    assert result.signal_sent is True
+    assert result.exited is True
+    assert process.sent_signal == system_ops.signal_module.SIGKILL

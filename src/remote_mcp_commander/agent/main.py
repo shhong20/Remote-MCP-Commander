@@ -32,6 +32,7 @@ from remote_mcp_commander.agent.system_ops import (
     list_processes,
     service_action,
     service_status,
+    signal_process,
     terminate_process,
 )
 from remote_mcp_commander.agent.tree_ops import inspect_tree, mutate_tree
@@ -64,6 +65,7 @@ from remote_mcp_commander.protocol import (
     PingResult,
     PortLookupRequest,
     ProcessListRequest,
+    ProcessSignalRequest,
     ProcessTerminateRequest,
     PtySessionCancelRequest,
     PtySessionDiscardRequest,
@@ -481,6 +483,17 @@ async def agent_loop() -> None:
                                 request.request_id,
                                 request.pid,
                                 request.expected_create_time_ms,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "process_signal_request":
+                            request = ProcessSignalRequest.model_validate(payload)
+                            result = await signal_process(
+                                request.request_id,
+                                request.pid,
+                                request.expected_create_time_ms,
+                                request.signal,
                             )
                             await websocket.send(result.model_dump_json())
                             continue
