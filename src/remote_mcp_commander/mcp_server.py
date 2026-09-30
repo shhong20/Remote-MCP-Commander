@@ -19,6 +19,7 @@ from remote_mcp_commander.protocol import (
     CommandSessionOutput,
     CommandSessionSnapshot,
     DirectoryListResult,
+    FileEditResult,
     FileInfoResult,
     FileReadResult,
     FileRootListResult,
@@ -263,6 +264,23 @@ def build_mcp(settings: Settings) -> MCPServer:
             content,
             overwrite=overwrite,
             expected_sha256=expected_sha256,
+        )
+
+    @server.tool()
+    async def edit_file(
+        agent_id: str,
+        path: str,
+        old_text: str,
+        new_text: str,
+        replace_all: bool = False,
+    ) -> FileEditResult:
+        """Atomically replace exact text in one UTF-8 file inside allowed roots."""
+        return await GatewayClient(settings).edit_file(
+            agent_id,
+            path,
+            old_text,
+            new_text,
+            replace_all=replace_all,
         )
 
     @server.tool()

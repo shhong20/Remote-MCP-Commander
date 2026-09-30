@@ -36,6 +36,7 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "file_info",
         "read_file",
         "write_file",
+        "edit_file",
         "search_files",
         "create_directory",
         "copy_file",

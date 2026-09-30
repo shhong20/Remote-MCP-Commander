@@ -22,3 +22,9 @@ Every source and destination must stay inside an allowed root. Final symlinks an
 Gateway persistent-audit preflight runs before each structured filesystem mutation. Hardened Agents do not advertise `filesystem.mutate`.
 
 The Personal mode shell remains available for advanced tasks, but these structured tools should be preferred when they express the requested operation directly.
+
+## Exact text editing
+
+Version 0.30 adds `edit_file(agent_id, path, old_text, new_text, replace_all=false)`. The default requires exactly one match; zero matches and ambiguous multiple matches fail without modifying the file. `replace_all=true` is an explicit opt-in for multiple replacements.
+
+Edits accept UTF-8 regular non-symlink files only, preserve the existing mode, enforce the file-size bound, write through a temporary file plus `fsync`, and recheck the source SHA-256 immediately before atomic replacement. Gateway persistent-audit preflight is required before dispatch.

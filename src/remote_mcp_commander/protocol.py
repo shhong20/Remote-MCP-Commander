@@ -166,6 +166,33 @@ class FileWriteResult(BaseModel):
     error: str | None = None
 
 
+class FileEditRequest(BaseModel):
+    type: Literal["file_edit_request"] = "file_edit_request"
+    request_id: str
+    path: str = Field(min_length=1, max_length=4096)
+    old_text: str = Field(min_length=1, max_length=1_048_576)
+    new_text: str = Field(max_length=1_048_576)
+    replace_all: bool = False
+
+
+class FileEditResult(BaseModel):
+    type: Literal["file_edit_result"] = "file_edit_result"
+    request_id: str
+    path: str = ""
+    replacements: int = 0
+    bytes_written: int = 0
+    sha256: str | None = None
+    rejected: bool = False
+    error: str | None = None
+
+
+class FileEditBody(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+    old_text: str = Field(min_length=1, max_length=1_048_576)
+    new_text: str = Field(max_length=1_048_576)
+    replace_all: bool = False
+
+
 class FileReadBody(BaseModel):
     path: str = Field(min_length=1, max_length=4096)
     offset: int = Field(default=0, ge=0)
