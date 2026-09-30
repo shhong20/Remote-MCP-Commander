@@ -4,12 +4,15 @@ import asyncio
 import os
 import re
 import shutil
+import signal as signal_module
 
 import psutil
 
 from remote_mcp_commander.protocol import (
     ProcessInfo,
     ProcessListResult,
+    ProcessSignal,
+    ProcessSignalResult,
     ProcessTerminateResult,
     ServiceAction,
     ServiceActionResult,
@@ -176,6 +179,92 @@ async def terminate_process(
         request_id,
         pid,
         expected_create_time_ms,
+    )
+
+
+def _signal_process_sync(
+    request_id: str,
+    pid: int,
+    expected_create_time_ms: int,
+    requested_signal: ProcessSignal,
+) -> ProcessSignalResult:
+    if pid == os.getpid():
+        return ProcessSignalResult(
+            request_id=request_id,
+            pid=pid,
+            signal=requested_signal,
+            rejected=True,
+            error="refusing to signal the Agent process",
+        )
+    signal_map = {
+        "term": signal_module.SIGTERM,
+        "kill": signal_module.SIGKILL,
+        "int": signal_module.SIGINT,
+        "hup": getattr(signal_module, "SIGHUP", None),
+    }
+    signal_value = signal_map[requested_signal]
+    if signal_value is None:
+        return ProcessSignalResult(
+            request_id=request_id,
+            pid=pid,
+            signal=requested_signal,
+            rejected=True,
+            error=f"signal is unavailable on this platform: {requested_signal}",
+        )
+    try:
+        process = psutil.Process(pid)
+        actual_create_time_ms = round(process.create_time() * 1000)
+        if actual_create_time_ms != expected_create_time_ms:
+            return ProcessSignalResult(
+                request_id=request_id,
+                pid=pid,
+                signal=requested_signal,
+                rejected=True,
+                error="process identity changed since inspection",
+            )
+        process.send_signal(signal_value)
+        try:
+            process.wait(timeout=2)
+            exited = True
+        except psutil.TimeoutExpired:
+            exited = False
+        return ProcessSignalResult(
+            request_id=request_id,
+            pid=pid,
+            signal=requested_signal,
+            signal_sent=True,
+            exited=exited,
+        )
+    except psutil.NoSuchProcess:
+        return ProcessSignalResult(
+            request_id=request_id,
+            pid=pid,
+            signal=requested_signal,
+            rejected=True,
+            error="process no longer exists",
+        )
+    except psutil.AccessDenied:
+        return ProcessSignalResult(
+            request_id=request_id,
+            pid=pid,
+            signal=requested_signal,
+            rejected=True,
+            error="permission denied",
+        )
+
+
+async def signal_process(
+    request_id: str,
+    pid: int,
+    expected_create_time_ms: int,
+    requested_signal: ProcessSignal,
+) -> ProcessSignalResult:
+    return await asyncio.to_thread(
+        _signal_process_sync,
+        request_id,
+        pid,
+        expected_create_time_ms,
+        requested_signal,
     )
 
 

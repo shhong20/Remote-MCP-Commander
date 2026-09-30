@@ -57,6 +57,7 @@ class Settings(BaseSettings):
     pty_allowed_executables: str = ""
     pty_agent_policies_json: str = "{}"
     personal_pty_approval_required: bool = False
+    personal_process_approval_required: bool = False
     pty_timeout_s: float = Field(default=900.0, ge=1.0, le=3600.0)
     pty_max_active: int = Field(default=1, ge=1, le=4)
     pty_input_max_bytes: int = Field(default=16_384, ge=1, le=65_536)

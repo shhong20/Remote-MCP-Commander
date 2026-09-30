@@ -651,3 +651,31 @@ async def test_tree_client_uses_inspect_copy_and_delete_routes() -> None:
     assert b'"destination":"/srv/tree-copy"' in requests[1].content
     assert requests[2].url.path.endswith("/files/tree/delete")
     assert tree_hash.encode() in requests[2].content
+
+
+@pytest.mark.asyncio
+async def test_signal_process_client_sends_structured_signal_payload() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "sig",
+                "pid": 123,
+                "signal": "kill",
+                "signal_sent": True,
+                "exited": True,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    result = await client.signal_process("server-01", 123, 456789, "kill")
+    assert result.signal == "kill"
+    assert result.signal_sent is True
+    assert seen[0].url.path.endswith("/processes/signal")
+    payload = seen[0].content.decode()
+    assert '"pid":123' in payload
+    assert '"expected_create_time_ms":456789' in payload
+    assert '"signal":"kill"' in payload

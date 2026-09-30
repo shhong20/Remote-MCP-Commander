@@ -16,7 +16,7 @@ Personal commands inherit a deliberately small user-context environment: `PATH`,
 
 If `COMMANDER_ALLOWED_ROOTS_JSON` is empty, personal mode exposes only the Agent user's home directory by default. Set explicit absolute roots to replace that default when narrower or additional filesystem scope is needed.
 
-Personal mode also supplies default PTY executables (`bash`, `sh`, `python`, `python3`, `node`). PTY startup still uses the existing one-use `pty.start` approval flow; personal mode does not silently remove that mutation boundary.
+Personal mode also supplies default PTY executables (`bash`, `sh`, `python`, `python3`, `node`). PTY startup is approval-free by default in Personal mode, while Hardened mode keeps the existing one-use `pty.start` approval flow.
 
 This mode is not an OS sandbox. In particular, `bash -lc` can compose commands and interpreters can execute arbitrary code as the Agent user. Run the Agent as an ordinary unprivileged account and do not grant that account broader OS privileges merely for Commander convenience.
 
@@ -35,3 +35,10 @@ Structured `search_files`, `create_directory`, `copy_file`, `move_path`, and non
 In Personal mode, PTY startup does not require an external one-use approval by default. This removes redundant friction because Personal mode already permits broad user-level shell execution. The Agent PTY executable allowlist and OS user permission boundary still apply.
 
 Set `COMMANDER_PERSONAL_PTY_APPROVAL_REQUIRED=true` on the Gateway to restore the one-use approval requirement while keeping the rest of Personal mode enabled. Hardened mode always requires PTY approval regardless of this setting. If either approval field is supplied manually, both fields must be supplied and the approval is consumed normally.
+
+
+## Structured process signals
+
+`signal_process` supports `term`, `kill`, `int`, and `hup` while binding every action to the inspected `(pid, create_time_ms)` identity so PID reuse cannot redirect a stale request. Personal mode does not require an external approval by default because the same Agent user can already signal its own processes through the broad shell path. Hardened mode always requires a one-use approval whose operation is bound to the exact signal type.
+
+Set `COMMANDER_PERSONAL_PROCESS_APPROVAL_REQUIRED=true` on the Gateway to restore one-use approval for structured process signals in Personal mode. The existing `terminate_process` tool remains approval-required in all modes for backward compatibility.

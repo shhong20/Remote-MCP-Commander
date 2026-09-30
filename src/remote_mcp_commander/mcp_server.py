@@ -33,6 +33,8 @@ from remote_mcp_commander.protocol import (
     PingResponse,
     PortLookupResult,
     ProcessListResult,
+    ProcessSignal,
+    ProcessSignalResult,
     ProcessTerminateResult,
     PtySessionDiscardResult,
     PtySessionInputResult,
@@ -471,6 +473,25 @@ def build_mcp(settings: Settings) -> MCPServer:
             agent_id,
             pid,
             expected_create_time_ms,
+            approval_id,
+            approval_secret,
+        )
+
+    @server.tool()
+    async def signal_process(
+        agent_id: str,
+        pid: int,
+        expected_create_time_ms: int,
+        signal: ProcessSignal,
+        approval_id: str | None = None,
+        approval_secret: str | None = None,
+    ) -> ProcessSignalResult:
+        """Send TERM/KILL/INT/HUP with PID-reuse protection and mode-aware approval."""
+        return await GatewayClient(settings).signal_process(
+            agent_id,
+            pid,
+            expected_create_time_ms,
+            signal,
             approval_id,
             approval_secret,
         )

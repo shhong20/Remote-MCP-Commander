@@ -106,6 +106,7 @@ def test_approval_admin_is_separate_from_control_auth() -> None:
 
 def test_approval_target_is_operation_specific() -> None:
     validate_approval_target("process.terminate", "pid:123@456789")
+    validate_approval_target("process.signal.kill", "pid:123@456789")
     validate_approval_target("service.restart", "demo.service")
     validate_approval_target("pty.start", pty_approval_target(["bash"]))
     with pytest.raises(HTTPException) as exc_info:

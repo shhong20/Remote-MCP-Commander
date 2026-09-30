@@ -27,6 +27,7 @@ from remote_mcp_commander.protocol import (
     PingResponse,
     PortLookupResult,
     ProcessListResult,
+    ProcessSignalResult,
     ProcessTerminateResult,
     PtySessionDiscardResult,
     PtySessionInputResult,
@@ -561,6 +562,28 @@ class GatewayClient:
             },
         )
         return ProcessTerminateResult.model_validate(payload)
+
+    async def signal_process(
+        self,
+        agent_id: str,
+        pid: int,
+        expected_create_time_ms: int,
+        requested_signal: str,
+        approval_id: str | None = None,
+        approval_secret: str | None = None,
+    ) -> ProcessSignalResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/processes/signal",
+            json_body={
+                "pid": pid,
+                "expected_create_time_ms": expected_create_time_ms,
+                "signal": requested_signal,
+                "approval_id": approval_id,
+                "approval_secret": approval_secret,
+            },
+        )
+        return ProcessSignalResult.model_validate(payload)
 
     async def service_action(
         self,

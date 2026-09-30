@@ -113,6 +113,9 @@ from remote_mcp_commander.protocol import (
     ProcessListBody,
     ProcessListRequest,
     ProcessListResult,
+    ProcessSignalBody,
+    ProcessSignalRequest,
+    ProcessSignalResult,
     ProcessTerminateBody,
     ProcessTerminateRequest,
     ProcessTerminateResult,
@@ -171,6 +174,7 @@ AgentReply = (
     | ProcessListResult
     | ServiceStatusResult
     | ProcessTerminateResult
+    | ProcessSignalResult
     | ServiceActionResult
     | CommandSessionSnapshot
     | CommandSessionOutput
@@ -278,6 +282,10 @@ def service_approval_operation(action: str) -> str:
     return f"service.{action}"
 
 
+def process_signal_approval_operation(requested_signal: str) -> str:
+    return f"process.signal.{requested_signal}"
+
+
 PROCESS_APPROVAL_TARGET_RE = re.compile(r"^pid:(?:[2-9]|[1-9][0-9]+)@[1-9][0-9]*$")
 SERVICE_APPROVAL_TARGET_RE = re.compile(r"^[A-Za-z0-9_.@:-]{1,256}$")
 PTY_APPROVAL_TARGET_RE = re.compile(r"^argv-sha256:[a-f0-9]{64}$")
@@ -290,7 +298,7 @@ def validate_command_session_id(session_id: str) -> None:
 
 
 def validate_approval_target(operation: str, target: str) -> None:
-    if operation == "process.terminate":
+    if operation == "process.terminate" or operation.startswith("process.signal."):
         valid = PROCESS_APPROVAL_TARGET_RE.fullmatch(target) is not None
     elif operation == "pty.start":
         valid = PTY_APPROVAL_TARGET_RE.fullmatch(target) is not None
@@ -1942,6 +1950,95 @@ async def terminate_agent_process(
 
 
 @app.post(
+    "/api/v1/agents/{agent_id}/processes/signal",
+    dependencies=[Depends(require_control_token)],
+)
+async def signal_agent_process(
+    agent_id: str, body: ProcessSignalBody, settings: SettingsDep
+) -> ProcessSignalResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "process.signal")
+    has_approval_id = body.approval_id is not None
+    has_approval_secret = body.approval_secret is not None
+    if has_approval_id != has_approval_secret:
+        raise HTTPException(
+            status_code=422,
+            detail="both process approval fields are required together",
+        )
+
+    target = process_approval_target(body.pid, body.expected_create_time_ms)
+    operation = process_signal_approval_operation(body.signal)
+    approval_required = not settings.personal_mode or settings.personal_process_approval_required
+    grant = None
+    if approval_required or has_approval_id:
+        if body.approval_id is None or body.approval_secret is None:
+            raise HTTPException(status_code=403, detail="process signal approval is required")
+        try:
+            grant = await approval_store().consume(
+                approval_id=body.approval_id,
+                secret=body.approval_secret,
+                agent_id=agent_id,
+                operation=operation,
+                target=target,
+            )
+        except ApprovalError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    if grant is not None:
+        audit_required(
+            "approval_consumed",
+            approval_id=grant.approval_id,
+            agent_id=agent_id,
+            operation=grant.operation,
+            target=grant.target,
+        )
+    else:
+        audit_required(
+            "process_signal_personal_approval_bypassed",
+            agent_id=agent_id,
+            operation=operation,
+            target=target,
+        )
+    audit_required(
+        "process_signal_requested",
+        agent_id=agent_id,
+        pid=body.pid,
+        signal=body.signal,
+    )
+    try:
+        request = ProcessSignalRequest(
+            request_id=request_id,
+            pid=body.pid,
+            expected_create_time_ms=body.expected_create_time_ms,
+            signal=body.signal,
+        )
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, ProcessSignalResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "process_signal",
+            agent_id=agent_id,
+            pid=body.pid,
+            signal=body.signal,
+            signal_sent=reply.signal_sent,
+            exited=reply.exited,
+            rejected=reply.rejected,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent process signal timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
     "/api/v1/agents/{agent_id}/services/action",
     dependencies=[Depends(require_control_token)],
 )
@@ -2158,6 +2255,8 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
                 reply = ServiceStatusResult.model_validate(payload)
             elif message_type == "process_terminate_result":
                 reply = ProcessTerminateResult.model_validate(payload)
+            elif message_type == "process_signal_result":
+                reply = ProcessSignalResult.model_validate(payload)
             elif message_type == "service_action_result":
                 reply = ServiceActionResult.model_validate(payload)
             elif message_type == "system_health_result":

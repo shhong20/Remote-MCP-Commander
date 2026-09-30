@@ -52,6 +52,7 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "list_processes",
         "service_status",
         "terminate_process",
+        "signal_process",
         "service_action",
         "start_command",
         "command_status",
@@ -103,6 +104,15 @@ async def test_mutation_tools_require_external_approval_fields() -> None:
 
     tools = {tool.name: tool for tool in result.tools}
     assert "create_approval" not in tools
+    signal_schema = tools["signal_process"].input_schema
+    assert set(signal_schema["required"]) == {
+        "agent_id",
+        "pid",
+        "expected_create_time_ms",
+        "signal",
+    }
+    assert "approval_id" in signal_schema["properties"]
+    assert "approval_secret" in signal_schema["properties"]
     terminate_schema = tools["terminate_process"].input_schema
     assert set(terminate_schema["required"]) == {
         "agent_id",
