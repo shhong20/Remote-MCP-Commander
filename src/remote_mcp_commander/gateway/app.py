@@ -82,6 +82,9 @@ from remote_mcp_commander.protocol import (
     FileInfoBody,
     FileInfoRequest,
     FileInfoResult,
+    FileLineReadBody,
+    FileLineReadRequest,
+    FileLineReadResult,
     FileReadBody,
     FileReadManyBody,
     FileReadManyRequest,
@@ -172,6 +175,7 @@ AgentReply = (
     CommandResult
     | PingResult
     | FileReadResult
+    | FileLineReadResult
     | FileReadManyResult
     | FileRootListResult
     | DirectoryListResult
@@ -1475,6 +1479,38 @@ async def read_file(agent_id: str, body: FileReadBody, settings: SettingsDep) ->
 
 
 @app.post(
+    "/api/v1/agents/{agent_id}/files/read-lines",
+    dependencies=[Depends(require_control_token)],
+)
+async def read_file_lines(
+    agent_id: str, body: FileLineReadBody, settings: SettingsDep
+) -> FileLineReadResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "file.read_lines")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = FileLineReadRequest(request_id=request_id, **body.model_dump())
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, FileLineReadResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "file_read_lines", agent_id=agent_id, path=body.path,
+            start_line=reply.start_line, next_line=reply.next_line, rejected=reply.rejected,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent line file read timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
     "/api/v1/agents/{agent_id}/files/read-many",
     dependencies=[Depends(require_control_token)],
 )
@@ -2400,6 +2436,8 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
                 reply = FileInfoResult.model_validate(payload)
             elif message_type == "file_read_result":
                 reply = FileReadResult.model_validate(payload)
+            elif message_type == "file_line_read_result":
+                reply = FileLineReadResult.model_validate(payload)
             elif message_type == "file_read_many_result":
                 reply = FileReadManyResult.model_validate(payload)
             elif message_type == "file_write_result":

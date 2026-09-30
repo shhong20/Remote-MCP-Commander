@@ -17,6 +17,7 @@ from remote_mcp_commander.protocol import (
     FileAppendResult,
     FileEditResult,
     FileInfoResult,
+    FileLineReadResult,
     FileReadManyResult,
     FileReadResult,
     FileRootListResult,
@@ -378,6 +379,15 @@ class GatewayClient:
             json_body={"path": path, "offset": offset, "max_bytes": max_bytes},
         )
         return FileReadResult.model_validate(payload)
+
+    async def read_file_lines(
+        self, agent_id: str, path: str, *, offset: int = 0, max_lines: int = 200
+    ) -> FileLineReadResult:
+        payload = await self._request(
+            "POST", f"/api/v1/agents/{agent_id}/files/read-lines",
+            json_body={"path": path, "offset": offset, "max_lines": max_lines},
+        )
+        return FileLineReadResult.model_validate(payload)
 
     async def read_many_files(
         self,

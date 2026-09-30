@@ -23,6 +23,7 @@ from remote_mcp_commander.protocol import (
     FileAppendResult,
     FileEditResult,
     FileInfoResult,
+    FileLineReadResult,
     FileReadManyResult,
     FileReadResult,
     FileRootListResult,
@@ -305,6 +306,15 @@ def build_mcp(settings: Settings) -> MCPServer:
         """Read a bounded text chunk from an absolute path inside Agent allowed roots."""
         return await GatewayClient(settings).read_file(
             agent_id, path, offset=offset, max_bytes=max_bytes
+        )
+
+    @server.tool()
+    async def read_file_lines(
+        agent_id: str, path: str, offset: int = 0, max_lines: int = 200
+    ) -> FileLineReadResult:
+        """Read bounded UTF-8 text by zero-based line offset; negative offset reads a tail."""
+        return await GatewayClient(settings).read_file_lines(
+            agent_id, path, offset=offset, max_lines=max_lines
         )
 
     @server.tool()
