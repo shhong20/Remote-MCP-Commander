@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import secrets
+from urllib.parse import urlparse
 
 from mcp.server import MCPServer
 from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.auth.settings import AuthSettings
+from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import AnyHttpUrl
 
 from remote_mcp_commander.config import Settings, get_settings
 from remote_mcp_commander.gateway.client import GatewayClient
+from remote_mcp_commander.oauth import OAuthTokenVerifier
 from remote_mcp_commander.protocol import (
     AgentInfo,
     CommandResult,
@@ -66,7 +69,11 @@ def build_mcp(settings: Settings) -> MCPServer:
     if settings.mcp_transport == "streamable-http":
         settings.validate_mcp_http_security()
         kwargs.update(
-            token_verifier=StaticTokenVerifier(settings),
+            token_verifier=(
+                OAuthTokenVerifier(settings)
+                if settings.mcp_auth_mode == "oauth"
+                else StaticTokenVerifier(settings)
+            ),
             auth=AuthSettings(
                 issuer_url=AnyHttpUrl(settings.mcp_issuer_url),
                 resource_server_url=AnyHttpUrl(settings.mcp_resource_url),
@@ -180,9 +187,7 @@ def build_mcp(settings: Settings) -> MCPServer:
         return await GatewayClient(settings).pty_session_status(agent_id, session_id)
 
     @server.tool()
-    async def write_pty(
-        agent_id: str, session_id: str, data: str
-    ) -> PtySessionInputResult:
+    async def write_pty(agent_id: str, session_id: str, data: str) -> PtySessionInputResult:
         """Write bounded UTF-8 input to a running approved PTY session."""
         return await GatewayClient(settings).write_pty_input(agent_id, session_id, data)
 
@@ -301,6 +306,26 @@ def build_mcp(settings: Settings) -> MCPServer:
     return server
 
 
+def http_transport_security(settings: Settings) -> TransportSecuritySettings:
+    """Keep DNS-rebinding checks while allowing the configured TLS proxy host."""
+    public = urlparse(settings.mcp_resource_url)
+    authority = public.netloc.lower()
+    hosts = ["127.0.0.1", "127.0.0.1:*", "localhost", "localhost:*", "[::1]", "[::1]:*"]
+    hosts.append(authority)
+    if public.scheme == "https" and public.port is None:
+        hosts.append(f"{authority}:443")
+    return TransportSecuritySettings(
+        allowed_hosts=hosts,
+        allowed_origins=[
+            f"{public.scheme}://{authority}",
+            "https://chatgpt.com",
+            "http://127.0.0.1:*",
+            "http://localhost:*",
+            "http://[::1]:*",
+        ],
+    )
+
+
 def run() -> None:
     settings = get_settings()
     server = build_mcp(settings)
@@ -314,6 +339,7 @@ def run() -> None:
         port=settings.mcp_port,
         streamable_http_path=settings.mcp_path,
         stateless_http=True,
+        transport_security=http_transport_security(settings),
     )
 
 

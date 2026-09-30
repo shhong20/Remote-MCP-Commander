@@ -29,7 +29,7 @@ Agents initiate outbound connections, so controlled hosts do not need inbound SS
 - MCP Python SDK v2 tool server
 - MCP tools for devices, bounded files, cancellable command/PTY sessions, system inspection, and approval-gated mutations
 - Streamable HTTP for deployed MCP access; stdio for local MCP clients
-- MCP bearer-token verification for Streamable HTTP
+- MCP bearer-token verification or single-user Auth0 OAuth for Streamable HTTP
 - Persistent outbound Agent -> Gateway WebSocket
 - One-time device enrollment, hashed registry credentials, and revocation
 - Per-agent token support and Gateway-side host policies
@@ -93,6 +93,14 @@ COMMANDER_MCP_TRANSPORT=streamable-http remote-mcp-server
 ```
 
 The endpoint defaults to `http://127.0.0.1:8766/mcp`. Streamable HTTP refuses to start without a sufficiently long `COMMANDER_MCP_TOKEN`.
+
+That token requirement applies to the default `static` auth mode. **For ChatGPT web,
+use `COMMANDER_MCP_AUTH_MODE=oauth`**, the dedicated `deploy/mcp-chatgpt.env.example`,
+and the [personal ChatGPT connection checklist](docs/chatgpt-connection.md).
+OAuth checks the Auth0 RS256 signature, issuer, exact MCP audience, expiry, scope,
+and one explicitly allowed user ID; it never falls back to the static token.
+After deploying TLS, `remote-mcp-connect-check` checks public discovery without
+claiming that the live ChatGPT login/tool flow has been tested.
 
 The current MCP tools are intentionally narrow:
 
