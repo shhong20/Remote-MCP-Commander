@@ -55,6 +55,9 @@ from remote_mcp_commander.protocol import (
     CommandSessionCancelRequest,
     CommandSessionDiscardRequest,
     CommandSessionDiscardResult,
+    CommandSessionInputBody,
+    CommandSessionInputRequest,
+    CommandSessionInputResult,
     CommandSessionOutput,
     CommandSessionOutputBody,
     CommandSessionOutputRequest,
@@ -62,6 +65,8 @@ from remote_mcp_commander.protocol import (
     CommandSessionStartBody,
     CommandSessionStartRequest,
     CommandSessionStatusRequest,
+    CommandSessionStdinCloseRequest,
+    CommandSessionStdinCloseResult,
     DirectoryListBody,
     DirectoryListRequest,
     DirectoryListResult,
@@ -196,6 +201,8 @@ AgentReply = (
     | ServiceActionResult
     | CommandSessionSnapshot
     | CommandSessionOutput
+    | CommandSessionInputResult
+    | CommandSessionStdinCloseResult
     | CommandSessionDiscardResult
     | SessionListResult
     | PtySessionSnapshot
@@ -778,6 +785,78 @@ async def cancel_command_session(
         return reply
     except TimeoutError as exc:
         raise HTTPException(status_code=504, detail="agent session cancel timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/commands/sessions/{session_id}/input",
+    dependencies=[Depends(require_control_token)],
+)
+async def write_command_session_input(
+    agent_id: str, session_id: str, body: CommandSessionInputBody, settings: SettingsDep
+) -> CommandSessionInputResult:
+    validate_command_session_id(session_id)
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "command.stdin")
+    input_bytes = len(body.data.encode())
+    if input_bytes > settings.session_input_max_bytes:
+        raise HTTPException(status_code=413, detail="command input exceeds byte limit")
+    request_id = uuid.uuid4().hex
+    audit_required(
+        "command_session_input_requested", agent_id=agent_id,
+        session_id=session_id, input_bytes=input_bytes,
+    )
+    future = pending_request(connection, request_id)
+    try:
+        request = CommandSessionInputRequest(
+            request_id=request_id, session_id=session_id, data=body.data
+        )
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, CommandSessionInputResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent command input timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/commands/sessions/{session_id}/stdin/close",
+    dependencies=[Depends(require_control_token)],
+)
+async def close_command_session_stdin(
+    agent_id: str, session_id: str, settings: SettingsDep
+) -> CommandSessionStdinCloseResult:
+    validate_command_session_id(session_id)
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "command.stdin")
+    request_id = uuid.uuid4().hex
+    audit_required(
+        "command_session_stdin_close_requested", agent_id=agent_id, session_id=session_id
+    )
+    future = pending_request(connection, request_id)
+    try:
+        request = CommandSessionStdinCloseRequest(
+            request_id=request_id, session_id=session_id
+        )
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, CommandSessionStdinCloseResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent stdin close timed out") from exc
     except ConnectionError as exc:
         raise HTTPException(status_code=503, detail="agent disconnected") from exc
     finally:
@@ -2410,6 +2489,10 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
                 reply = CommandSessionSnapshot.model_validate(payload)
             elif message_type == "command_session_output":
                 reply = CommandSessionOutput.model_validate(payload)
+            elif message_type == "command_session_input_result":
+                reply = CommandSessionInputResult.model_validate(payload)
+            elif message_type == "command_session_stdin_close_result":
+                reply = CommandSessionStdinCloseResult.model_validate(payload)
             elif message_type == "command_session_discard_result":
                 reply = CommandSessionDiscardResult.model_validate(payload)
             elif message_type == "session_list_result":

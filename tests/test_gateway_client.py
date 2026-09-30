@@ -837,3 +837,39 @@ async def test_line_read_client_sends_offset_and_limit() -> None:
     payload = seen[0].content.decode()
     assert '"offset":4' in payload
     assert '"max_lines":1' in payload
+
+
+@pytest.mark.asyncio
+async def test_command_stdin_client_uses_input_and_close_routes() -> None:
+    seen: list[httpx.Request] = []
+    session_id = "d" * 32
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path.endswith("/input"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "input",
+                    "session_id": session_id,
+                    "accepted_bytes": 6,
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "close",
+                "session_id": session_id,
+                "closed": True,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    written = await client.write_command_input("server-01", session_id, "hello\n")
+    closed = await client.close_command_stdin("server-01", session_id)
+
+    assert written.accepted_bytes == 6
+    assert closed.closed is True
+    assert seen[0].url.path.endswith(f"/{session_id}/input")
+    assert seen[0].content == b'{"data":"hello\\n"}'
+    assert seen[1].url.path.endswith(f"/{session_id}/stdin/close")

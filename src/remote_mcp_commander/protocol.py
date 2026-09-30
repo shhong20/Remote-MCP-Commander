@@ -977,6 +977,37 @@ class CommandSessionOutputRequest(BaseModel):
     max_chars: int = Field(default=8192, ge=1, le=65_536)
 
 
+class CommandSessionInputRequest(BaseModel):
+    type: Literal["command_session_input_request"] = "command_session_input_request"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    data: str = Field(min_length=1, max_length=16_384)
+
+
+class CommandSessionInputResult(BaseModel):
+    type: Literal["command_session_input_result"] = "command_session_input_result"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    accepted_bytes: int = 0
+    rejected: bool = False
+    error: str | None = None
+
+
+class CommandSessionStdinCloseRequest(BaseModel):
+    type: Literal["command_session_stdin_close_request"] = "command_session_stdin_close_request"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+
+
+class CommandSessionStdinCloseResult(BaseModel):
+    type: Literal["command_session_stdin_close_result"] = "command_session_stdin_close_result"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    closed: bool = False
+    rejected: bool = False
+    error: str | None = None
+
+
 class CommandSessionDiscardRequest(BaseModel):
     type: Literal["command_session_discard_request"] = "command_session_discard_request"
     request_id: str
@@ -1029,6 +1060,10 @@ class CommandSessionStartBody(BaseModel):
     argv: list[CommandArg] = Field(min_length=1, max_length=64)
     cwd: str | None = Field(default=None, min_length=1, max_length=4096)
     env: CommandEnv = Field(default_factory=dict, max_length=32)
+
+
+class CommandSessionInputBody(BaseModel):
+    data: str = Field(min_length=1, max_length=16_384)
 
 
 class CommandSessionOutputBody(BaseModel):

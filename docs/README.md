@@ -26,3 +26,4 @@
 - [Recursive directory listing](recursive-directory-listing.md)
 - [Structured file append](file-append.md)
 - [Line-based text file reads](line-file-read.md)
+- [Command session stdin](command-session-stdin.md)

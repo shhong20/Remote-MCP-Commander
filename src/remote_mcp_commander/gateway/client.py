@@ -10,8 +10,10 @@ from remote_mcp_commander.protocol import (
     AgentList,
     CommandResult,
     CommandSessionDiscardResult,
+    CommandSessionInputResult,
     CommandSessionOutput,
     CommandSessionSnapshot,
+    CommandSessionStdinCloseResult,
     DirectoryListResult,
     DirectoryTreeResult,
     FileAppendResult,
@@ -206,6 +208,25 @@ class GatewayClient:
             f"/api/v1/agents/{agent_id}/commands/sessions/{session_id}/cancel",
         )
         return CommandSessionSnapshot.model_validate(payload)
+
+    async def write_command_input(
+        self, agent_id: str, session_id: str, data: str
+    ) -> CommandSessionInputResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/commands/sessions/{session_id}/input",
+            json_body={"data": data},
+        )
+        return CommandSessionInputResult.model_validate(payload)
+
+    async def close_command_stdin(
+        self, agent_id: str, session_id: str
+    ) -> CommandSessionStdinCloseResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/commands/sessions/{session_id}/stdin/close",
+        )
+        return CommandSessionStdinCloseResult.model_validate(payload)
 
     async def command_session_output(
         self,

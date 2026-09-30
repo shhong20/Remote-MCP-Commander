@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     max_output_bytes: int = Field(default=65_536, ge=1_024, le=262_144)
     exec_timeout_s: float = 10.0
     session_timeout_s: float = Field(default=300.0, ge=1.0, le=3600.0)
+    session_input_max_bytes: int = Field(default=16_384, ge=1, le=65_536)
     session_max_active: int = Field(default=4, ge=1, le=32)
     session_history_limit: int = Field(default=100, ge=10, le=200)
     pty_allowed_executables: str = ""
