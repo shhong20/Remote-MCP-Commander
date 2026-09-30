@@ -11,6 +11,7 @@ PROTOCOL_MAX_SUPPORTED = 1
 AGENT_ID_PATTERN = r"^[A-Za-z0-9_.-]{1,128}$"
 SESSION_ID_PATTERN = r"^[a-f0-9]{32}$"
 CommandArg = Annotated[str, Field(min_length=1, max_length=4096)]
+FilePath = Annotated[str, Field(min_length=1, max_length=4096)]
 CapabilityName = Annotated[
     str, Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_.-]{0,63}$")
 ]
@@ -149,6 +150,39 @@ class FileReadResult(BaseModel):
     sha256: str | None = None
     rejected: bool = False
     error: str | None = None
+
+
+class FileReadManyRequest(BaseModel):
+    type: Literal["file_read_many_request"] = "file_read_many_request"
+    request_id: str
+    paths: list[FilePath] = Field(min_length=1, max_length=20)
+    max_bytes_per_file: int = Field(default=32_768, ge=4, le=65_536)
+    max_total_bytes: int = Field(default=262_144, ge=4, le=524_288)
+
+
+class FileReadManyItem(BaseModel):
+    path: str
+    content: str = ""
+    size: int = 0
+    eof: bool = True
+    sha256: str | None = None
+    rejected: bool = False
+    error: str | None = None
+
+
+class FileReadManyResult(BaseModel):
+    type: Literal["file_read_many_result"] = "file_read_many_result"
+    request_id: str
+    files: list[FileReadManyItem] = Field(default_factory=list)
+    requested_count: int = 0
+    total_bytes: int = 0
+    truncated: bool = False
+
+
+class FileReadManyBody(BaseModel):
+    paths: list[FilePath] = Field(min_length=1, max_length=20)
+    max_bytes_per_file: int = Field(default=32_768, ge=4, le=65_536)
+    max_total_bytes: int = Field(default=262_144, ge=4, le=524_288)
 
 
 class FileWriteRequest(BaseModel):

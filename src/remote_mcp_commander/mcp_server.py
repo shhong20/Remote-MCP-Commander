@@ -21,6 +21,7 @@ from remote_mcp_commander.protocol import (
     DirectoryListResult,
     FileEditResult,
     FileInfoResult,
+    FileReadManyResult,
     FileReadResult,
     FileRootListResult,
     FileSearchResult,
@@ -251,6 +252,21 @@ def build_mcp(settings: Settings) -> MCPServer:
         """Read a bounded text chunk from an absolute path inside Agent allowed roots."""
         return await GatewayClient(settings).read_file(
             agent_id, path, offset=offset, max_bytes=max_bytes
+        )
+
+    @server.tool()
+    async def read_files(
+        agent_id: str,
+        paths: list[str],
+        max_bytes_per_file: int = 32_768,
+        max_total_bytes: int = 262_144,
+    ) -> FileReadManyResult:
+        """Read bounded initial chunks from multiple text files inside allowed roots."""
+        return await GatewayClient(settings).read_many_files(
+            agent_id,
+            paths,
+            max_bytes_per_file=max_bytes_per_file,
+            max_total_bytes=max_total_bytes,
         )
 
     @server.tool()

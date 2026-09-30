@@ -7,7 +7,12 @@ import secrets
 import tempfile
 from pathlib import Path
 
-from remote_mcp_commander.protocol import FileReadResult, FileWriteResult
+from remote_mcp_commander.protocol import (
+    FileReadManyItem,
+    FileReadManyResult,
+    FileReadResult,
+    FileWriteResult,
+)
 
 
 def allowed_roots(raw_roots: list[str]) -> list[Path]:
@@ -184,6 +189,76 @@ def _write_text_file_sync(
         )
     except (OSError, PermissionError, ValueError) as exc:
         return FileWriteResult(request_id=request_id, rejected=True, error=str(exc))
+
+
+def _read_many_text_files_sync(
+    request_id: str,
+    raw_paths: list[str],
+    *,
+    roots: list[Path],
+    max_bytes_per_file: int,
+    max_total_bytes: int,
+    max_file_bytes: int,
+) -> FileReadManyResult:
+    files: list[FileReadManyItem] = []
+    total_bytes = 0
+    truncated = False
+    for index, raw_path in enumerate(raw_paths):
+        remaining = max_total_bytes - total_bytes
+        if remaining < 4:
+            truncated = True
+            break
+        result = _read_text_file_sync(
+            request_id,
+            raw_path,
+            roots=roots,
+            offset=0,
+            max_bytes=min(max_bytes_per_file, remaining),
+            max_file_bytes=max_file_bytes,
+        )
+        content_bytes = len(result.content.encode("utf-8"))
+        total_bytes += content_bytes
+        files.append(
+            FileReadManyItem(
+                path=result.path or raw_path,
+                content=result.content,
+                size=result.size,
+                eof=result.eof,
+                sha256=result.sha256,
+                rejected=result.rejected,
+                error=result.error,
+            )
+        )
+        if total_bytes >= max_total_bytes and index + 1 < len(raw_paths):
+            truncated = True
+            break
+    return FileReadManyResult(
+        request_id=request_id,
+        files=files,
+        requested_count=len(raw_paths),
+        total_bytes=total_bytes,
+        truncated=truncated,
+    )
+
+
+async def read_many_text_files(
+    request_id: str,
+    raw_paths: list[str],
+    *,
+    roots: list[Path],
+    max_bytes_per_file: int,
+    max_total_bytes: int,
+    max_file_bytes: int,
+) -> FileReadManyResult:
+    return await asyncio.to_thread(
+        _read_many_text_files_sync,
+        request_id,
+        raw_paths,
+        roots=roots,
+        max_bytes_per_file=max_bytes_per_file,
+        max_total_bytes=max_total_bytes,
+        max_file_bytes=max_file_bytes,
+    )
 
 
 async def read_text_file(

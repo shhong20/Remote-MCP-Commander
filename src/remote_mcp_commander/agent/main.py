@@ -11,7 +11,12 @@ from remote_mcp_commander import __version__
 from remote_mcp_commander.agent.capabilities import detect_capabilities
 from remote_mcp_commander.agent.diagnostics import lookup_port, service_logs, system_health
 from remote_mcp_commander.agent.edit_ops import edit_text_file
-from remote_mcp_commander.agent.file_ops import allowed_roots, read_text_file, write_text_file
+from remote_mcp_commander.agent.file_ops import (
+    allowed_roots,
+    read_many_text_files,
+    read_text_file,
+    write_text_file,
+)
 from remote_mcp_commander.agent.filesystem_ops import file_info, list_directory, list_file_roots
 from remote_mcp_commander.agent.git_ops import git_status
 from remote_mcp_commander.agent.one_shot import OneShotCommandDispatcher
@@ -39,6 +44,7 @@ from remote_mcp_commander.protocol import (
     DirectoryListRequest,
     FileEditRequest,
     FileInfoRequest,
+    FileReadManyRequest,
     FileReadRequest,
     FileRootListRequest,
     FileSearchRequest,
@@ -320,6 +326,19 @@ async def agent_loop() -> None:
                                 roots=roots,
                                 offset=request.offset,
                                 max_bytes=request.max_bytes,
+                                max_file_bytes=settings.file_max_bytes,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "file_read_many_request":
+                            request = FileReadManyRequest.model_validate(payload)
+                            result = await read_many_text_files(
+                                request.request_id,
+                                request.paths,
+                                roots=roots,
+                                max_bytes_per_file=request.max_bytes_per_file,
+                                max_total_bytes=request.max_total_bytes,
                                 max_file_bytes=settings.file_max_bytes,
                             )
                             await websocket.send(result.model_dump_json())

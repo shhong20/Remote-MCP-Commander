@@ -35,6 +35,7 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "list_directory",
         "file_info",
         "read_file",
+        "read_files",
         "write_file",
         "edit_file",
         "search_files",
@@ -201,3 +202,16 @@ async def test_command_tools_expose_optional_working_directory() -> None:
         schema = tools[name].input_schema
         assert "cwd" in schema["properties"]
         assert "cwd" not in schema["required"]
+
+
+@pytest.mark.asyncio
+async def test_read_files_schema_is_bounded() -> None:
+    server = build_mcp(make_settings())
+    async with Client(server) as client:
+        result = await client.list_tools()
+
+    tool = next(item for item in result.tools if item.name == "read_files")
+    schema = tool.input_schema
+    assert set(schema["required"]) == {"agent_id", "paths"}
+    assert schema["properties"]["max_bytes_per_file"]["default"] == 32768
+    assert schema["properties"]["max_total_bytes"]["default"] == 262144

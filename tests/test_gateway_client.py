@@ -516,3 +516,35 @@ async def test_command_clients_send_optional_working_directory() -> None:
     assert len(requests) == 2
     for request in requests:
         assert b'"cwd":"/srv/project"' in request.content
+
+
+@pytest.mark.asyncio
+async def test_read_many_files_sends_bounded_payload() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "batch",
+                "files": [],
+                "requested_count": 2,
+                "total_bytes": 0,
+                "truncated": False,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    result = await client.read_many_files(
+        "server-01",
+        ["/srv/a.py", "/srv/b.py"],
+        max_bytes_per_file=1234,
+        max_total_bytes=4321,
+    )
+
+    assert result.requested_count == 2
+    assert requests[0].url.path.endswith("/files/read-many")
+    payload = requests[0].content
+    assert b'"max_bytes_per_file":1234' in payload
+    assert b'"max_total_bytes":4321' in payload
