@@ -165,3 +165,20 @@ def test_command_protocol_rejects_oversized_argument() -> None:
 
     with pytest.raises(ValidationError):
         ExecuteBody(argv=["echo", "x" * 4097])
+
+
+def test_personal_gateway_policy_allows_broad_developer_commands() -> None:
+    settings = make_settings(operation_mode="personal")
+
+    enforce_agent_policy("server-01", ["ls", "-la"], settings)
+    enforce_agent_policy("server-01", ["bash", "-lc", "printf ok"], settings)
+
+
+def test_personal_gateway_pty_policy_uses_personal_defaults_when_unconfigured() -> None:
+    settings = make_settings(operation_mode="personal", pty_agent_policies_json="{}")
+
+    enforce_pty_policy("server-01", ["bash"], settings)
+
+    with pytest.raises(HTTPException) as exc_info:
+        enforce_pty_policy("server-01", ["sudo"], settings)
+    assert exc_info.value.status_code == 403

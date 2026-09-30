@@ -268,7 +268,7 @@ def validate_approval_target(operation: str, target: str) -> None:
 
 
 def enforce_agent_policy(agent_id: str, argv: list[str], settings: Settings) -> None:
-    generic_error = validate_generic_argv(argv)
+    generic_error = validate_generic_argv(argv, mode=settings.operation_mode)
     if generic_error is not None:
         audit("command_denied", agent_id=agent_id, executable=Path(argv[0]).name)
         raise HTTPException(status_code=403, detail=generic_error)
@@ -291,6 +291,8 @@ def enforce_pty_policy(agent_id: str, argv: list[str], settings: Settings) -> No
         audit("pty_session_denied", agent_id=agent_id, executable=executable)
         raise HTTPException(status_code=403, detail=policy_error)
     policy = settings.pty_agent_policies.get(agent_id)
+    if policy is None and settings.personal_mode:
+        policy = settings.pty_executable_allowlist
     if policy is None or executable not in policy:
         audit("pty_session_denied", agent_id=agent_id, executable=executable)
         raise HTTPException(
@@ -828,9 +830,7 @@ async def get_pty_session(
     future = pending_request(connection, request_id)
     try:
         await connection.websocket.send_text(
-            PtySessionStatusRequest(
-                request_id=request_id, session_id=session_id
-            ).model_dump_json()
+            PtySessionStatusRequest(request_id=request_id, session_id=session_id).model_dump_json()
         )
         reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
         if not isinstance(reply, PtySessionSnapshot):
@@ -988,9 +988,7 @@ async def cancel_pty_session(
     future = pending_request(connection, request_id)
     try:
         await connection.websocket.send_text(
-            PtySessionCancelRequest(
-                request_id=request_id, session_id=session_id
-            ).model_dump_json()
+            PtySessionCancelRequest(request_id=request_id, session_id=session_id).model_dump_json()
         )
         reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
         if not isinstance(reply, PtySessionSnapshot):
@@ -1020,9 +1018,7 @@ async def discard_pty_session(
     future = pending_request(connection, request_id)
     try:
         await connection.websocket.send_text(
-            PtySessionDiscardRequest(
-                request_id=request_id, session_id=session_id
-            ).model_dump_json()
+            PtySessionDiscardRequest(request_id=request_id, session_id=session_id).model_dump_json()
         )
         reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
         if not isinstance(reply, PtySessionDiscardResult):
