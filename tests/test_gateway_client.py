@@ -750,3 +750,34 @@ async def test_runtime_session_list_client_sends_filters() -> None:
     assert '"kind":"pty"' in payload
     assert '"include_completed":true' in payload
     assert '"limit":25' in payload
+
+
+@pytest.mark.asyncio
+async def test_directory_tree_client_sends_bounded_recursive_options() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "tree-list",
+                "path": "/srv/project",
+                "entries": [],
+                "scanned_directories": 1,
+                "truncated": False,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    result = await client.list_directory_tree(
+        "server-01", "/srv/project", depth=3, include_hidden=True,
+        per_directory_limit=25, max_entries=250,
+    )
+    assert result.scanned_directories == 1
+    assert seen[0].url.path.endswith("/files/tree-list")
+    payload = seen[0].content.decode()
+    assert '"depth":3' in payload
+    assert '"include_hidden":true' in payload
+    assert '"per_directory_limit":25' in payload
+    assert '"max_entries":250' in payload

@@ -293,6 +293,45 @@ class DirectoryListBody(BaseModel):
     limit: int = Field(default=200, ge=1, le=500)
 
 
+class DirectoryTreeEntry(BaseModel):
+    name: str
+    path: str
+    relative_path: str
+    kind: FileEntryKind
+    depth: int = Field(ge=1, le=5)
+    size: int | None = None
+    modified_at: datetime | None = None
+
+
+class DirectoryTreeRequest(BaseModel):
+    type: Literal["directory_tree_request"] = "directory_tree_request"
+    request_id: str
+    path: str = Field(min_length=1, max_length=4096)
+    depth: int = Field(default=2, ge=1, le=5)
+    include_hidden: bool = False
+    per_directory_limit: int = Field(default=100, ge=1, le=200)
+    max_entries: int = Field(default=1000, ge=1, le=2000)
+
+
+class DirectoryTreeResult(BaseModel):
+    type: Literal["directory_tree_result"] = "directory_tree_result"
+    request_id: str
+    path: str = ""
+    entries: list[DirectoryTreeEntry] = Field(default_factory=list)
+    scanned_directories: int = 0
+    truncated: bool = False
+    rejected: bool = False
+    error: str | None = None
+
+
+class DirectoryTreeBody(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+    depth: int = Field(default=2, ge=1, le=5)
+    include_hidden: bool = False
+    per_directory_limit: int = Field(default=100, ge=1, le=200)
+    max_entries: int = Field(default=1000, ge=1, le=2000)
+
+
 class FileInfoRequest(BaseModel):
     type: Literal["file_info_request"] = "file_info_request"
     request_id: str

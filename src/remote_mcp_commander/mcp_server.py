@@ -19,6 +19,7 @@ from remote_mcp_commander.protocol import (
     CommandSessionOutput,
     CommandSessionSnapshot,
     DirectoryListResult,
+    DirectoryTreeResult,
     FileEditResult,
     FileInfoResult,
     FileReadManyResult,
@@ -275,6 +276,21 @@ def build_mcp(settings: Settings) -> MCPServer:
     async def list_directory(agent_id: str, path: str, limit: int = 200) -> DirectoryListResult:
         """List one directory inside allowed roots without recursive traversal."""
         return await GatewayClient(settings).list_directory(agent_id, path, limit=limit)
+
+    @server.tool()
+    async def list_directory_tree(
+        agent_id: str,
+        path: str,
+        depth: int = 2,
+        include_hidden: bool = False,
+        per_directory_limit: int = 100,
+        max_entries: int = 1000,
+    ) -> DirectoryTreeResult:
+        """List a bounded recursive directory tree without following symlinks."""
+        return await GatewayClient(settings).list_directory_tree(
+            agent_id, path, depth=depth, include_hidden=include_hidden,
+            per_directory_limit=per_directory_limit, max_entries=max_entries,
+        )
 
     @server.tool()
     async def file_info(agent_id: str, path: str) -> FileInfoResult:

@@ -33,6 +33,7 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "execute",
         "list_file_roots",
         "list_directory",
+        "list_directory_tree",
         "file_info",
         "read_file",
         "read_files",
@@ -142,6 +143,12 @@ async def test_command_session_tools_use_structured_contracts() -> None:
     start_schema = tools["start_command"].input_schema
     assert start_schema["properties"]["argv"]["type"] == "array"
     assert set(start_schema["required"]) == {"agent_id", "argv"}
+    tree_schema = tools["list_directory_tree"].input_schema
+    assert tree_schema["properties"]["depth"]["default"] == 2
+    assert tree_schema["properties"]["include_hidden"]["default"] is False
+    assert tree_schema["properties"]["per_directory_limit"]["default"] == 100
+    assert tree_schema["properties"]["max_entries"]["default"] == 1000
+
     list_schema = tools["list_sessions"].input_schema
     assert set(list_schema["required"]) == {"agent_id"}
     assert list_schema["properties"]["kind"]["default"] == "all"

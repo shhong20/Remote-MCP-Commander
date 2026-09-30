@@ -13,6 +13,7 @@ from remote_mcp_commander.protocol import (
     CommandSessionOutput,
     CommandSessionSnapshot,
     DirectoryListResult,
+    DirectoryTreeResult,
     FileEditResult,
     FileInfoResult,
     FileReadManyResult,
@@ -333,6 +334,26 @@ class GatewayClient:
             json_body={"path": path, "limit": limit},
         )
         return DirectoryListResult.model_validate(payload)
+
+    async def list_directory_tree(
+        self,
+        agent_id: str,
+        path: str,
+        *,
+        depth: int = 2,
+        include_hidden: bool = False,
+        per_directory_limit: int = 100,
+        max_entries: int = 1000,
+    ) -> DirectoryTreeResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/files/tree-list",
+            json_body={
+                "path": path, "depth": depth, "include_hidden": include_hidden,
+                "per_directory_limit": per_directory_limit, "max_entries": max_entries,
+            },
+        )
+        return DirectoryTreeResult.model_validate(payload)
 
     async def file_info(self, agent_id: str, path: str) -> FileInfoResult:
         payload = await self._request(
