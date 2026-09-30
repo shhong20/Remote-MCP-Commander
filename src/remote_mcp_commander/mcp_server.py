@@ -22,8 +22,10 @@ from remote_mcp_commander.protocol import (
     FileInfoResult,
     FileReadResult,
     FileRootListResult,
+    FileSearchResult,
     FileWriteResult,
     GitStatusResult,
+    PathMutationResult,
     PingResponse,
     PortLookupResult,
     ProcessListResult,
@@ -262,6 +264,57 @@ def build_mcp(settings: Settings) -> MCPServer:
             overwrite=overwrite,
             expected_sha256=expected_sha256,
         )
+
+    @server.tool()
+    async def search_files(
+        agent_id: str,
+        root: str,
+        query: str,
+        mode: str = "files",
+        file_glob: str | None = None,
+        case_sensitive: bool = False,
+        max_results: int = 100,
+    ) -> FileSearchResult:
+        """Search file names or UTF-8 text content recursively inside allowed roots."""
+        return await GatewayClient(settings).search_files(
+            agent_id,
+            root,
+            query,
+            mode=mode,
+            file_glob=file_glob,
+            case_sensitive=case_sensitive,
+            max_results=max_results,
+        )
+
+    @server.tool()
+    async def create_directory(
+        agent_id: str, path: str, parents: bool = False
+    ) -> PathMutationResult:
+        """Create a directory inside allowed roots."""
+        return await GatewayClient(settings).mutate_path(agent_id, "mkdir", path, parents=parents)
+
+    @server.tool()
+    async def copy_file(
+        agent_id: str, source: str, destination: str, overwrite: bool = False
+    ) -> PathMutationResult:
+        """Copy one regular file inside allowed roots."""
+        return await GatewayClient(settings).mutate_path(
+            agent_id, "copy", source, destination=destination, overwrite=overwrite
+        )
+
+    @server.tool()
+    async def move_path(
+        agent_id: str, source: str, destination: str, overwrite: bool = False
+    ) -> PathMutationResult:
+        """Move a non-symlink path between locations inside allowed roots."""
+        return await GatewayClient(settings).mutate_path(
+            agent_id, "move", source, destination=destination, overwrite=overwrite
+        )
+
+    @server.tool()
+    async def delete_path(agent_id: str, path: str) -> PathMutationResult:
+        """Delete one regular file or empty directory inside allowed roots; never recursive."""
+        return await GatewayClient(settings).mutate_path(agent_id, "delete", path)
 
     @server.tool()
     async def list_processes(agent_id: str, limit: int = 100) -> ProcessListResult:

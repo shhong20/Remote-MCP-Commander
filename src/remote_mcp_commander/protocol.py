@@ -245,6 +245,73 @@ class FileInfoBody(BaseModel):
     path: str = Field(min_length=1, max_length=4096)
 
 
+FileSearchMode = Literal["files", "content"]
+
+
+class FileSearchRequest(BaseModel):
+    type: Literal["file_search_request"] = "file_search_request"
+    request_id: str
+    root: str = Field(min_length=1, max_length=4096)
+    query: str = Field(min_length=1, max_length=256)
+    mode: FileSearchMode = "files"
+    file_glob: str | None = Field(default=None, max_length=256)
+    case_sensitive: bool = False
+    max_results: int = Field(default=100, ge=1, le=200)
+
+
+class FileSearchMatch(BaseModel):
+    path: str
+    line: int | None = None
+    preview: str | None = None
+
+
+class FileSearchResult(BaseModel):
+    type: Literal["file_search_result"] = "file_search_result"
+    request_id: str
+    matches: list[FileSearchMatch] = Field(default_factory=list)
+    scanned_files: int = 0
+    truncated: bool = False
+    rejected: bool = False
+    error: str | None = None
+
+
+class FileSearchBody(BaseModel):
+    root: str = Field(min_length=1, max_length=4096)
+    query: str = Field(min_length=1, max_length=256)
+    mode: FileSearchMode = "files"
+    file_glob: str | None = Field(default=None, max_length=256)
+    case_sensitive: bool = False
+    max_results: int = Field(default=100, ge=1, le=200)
+
+
+class PathMutationRequest(BaseModel):
+    type: Literal["path_mutation_request"] = "path_mutation_request"
+    request_id: str
+    operation: Literal["mkdir", "copy", "move", "delete"]
+    path: str = Field(min_length=1, max_length=4096)
+    destination: str | None = Field(default=None, max_length=4096)
+    parents: bool = False
+    overwrite: bool = False
+
+
+class PathMutationResult(BaseModel):
+    type: Literal["path_mutation_result"] = "path_mutation_result"
+    request_id: str
+    operation: Literal["mkdir", "copy", "move", "delete"]
+    path: str = ""
+    destination: str | None = None
+    changed: bool = False
+    rejected: bool = False
+    error: str | None = None
+
+
+class PathMutationBody(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+    destination: str | None = Field(default=None, max_length=4096)
+    parents: bool = False
+    overwrite: bool = False
+
+
 class ProcessInfo(BaseModel):
     pid: int
     create_time_ms: int

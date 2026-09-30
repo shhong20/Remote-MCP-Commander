@@ -20,3 +20,4 @@
 - [Signed runtime-lock publication](runtime-publication.md)
 - [Automatic health-check rollback](health-rollback.md)
 - [Immutable artifact registry](artifact-registry.md)
+- [Personal filesystem tools](personal-filesystem-tools.md)

@@ -300,12 +300,8 @@ async def test_pty_session_methods_use_expected_routes_and_payloads() -> None:
     )
     status = await client.pty_session_status("server-01", session_id)
     accepted = await client.write_pty_input("server-01", session_id, "x\n")
-    resized = await client.resize_pty_session(
-        "server-01", session_id, columns=120, rows=40
-    )
-    output = await client.pty_session_output(
-        "server-01", session_id, offset=3, max_chars=4
-    )
+    resized = await client.resize_pty_session("server-01", session_id, columns=120, rows=40)
+    output = await client.pty_session_output("server-01", session_id, offset=3, max_chars=4)
     cancelled = await client.cancel_pty_session("server-01", session_id)
     discarded = await client.discard_pty_session("server-01", session_id)
 
@@ -419,3 +415,43 @@ async def test_filesystem_discovery_methods_use_expected_routes() -> None:
     assert b'"limit":25' in requests[1].content
     assert requests[2].url.path.endswith("/files/info")
     assert b'"path":"/srv/project/file.txt"' in requests[2].content
+
+
+@pytest.mark.asyncio
+async def test_search_and_path_mutation_methods_use_expected_routes() -> None:
+    requests: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/files/search"):
+            return httpx.Response(200, json={"request_id": "s", "matches": [], "scanned_files": 1})
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "m",
+                "operation": request.url.path.rsplit("/", 1)[-1],
+                "path": "/home/ubuntu/a",
+                "changed": True,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    await client.search_files(
+        "server-01", "/home/ubuntu", "needle", mode="content", file_glob="*.py"
+    )
+    await client.mutate_path("server-01", "mkdir", "/home/ubuntu/a", parents=True)
+    await client.mutate_path(
+        "server-01",
+        "copy",
+        "/home/ubuntu/a.txt",
+        destination="/home/ubuntu/b.txt",
+        overwrite=True,
+    )
+
+    assert requests[0].url.path.endswith("/files/search")
+    assert '"mode":"content"' in requests[0].content.decode()
+    assert '"file_glob":"*.py"' in requests[0].content.decode()
+    assert requests[1].url.path.endswith("/files/mkdir")
+    assert '"parents":true' in requests[1].content.decode()
+    assert requests[2].url.path.endswith("/files/copy")
+    assert '"destination":"/home/ubuntu/b.txt"' in requests[2].content.decode()

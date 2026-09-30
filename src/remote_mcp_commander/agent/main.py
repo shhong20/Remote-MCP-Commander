@@ -14,7 +14,9 @@ from remote_mcp_commander.agent.executor import execute_argv
 from remote_mcp_commander.agent.file_ops import allowed_roots, read_text_file, write_text_file
 from remote_mcp_commander.agent.filesystem_ops import file_info, list_directory, list_file_roots
 from remote_mcp_commander.agent.git_ops import git_status
+from remote_mcp_commander.agent.path_ops import mutate_path
 from remote_mcp_commander.agent.pty_ops import PtySessionManager
+from remote_mcp_commander.agent.search_ops import search_files
 from remote_mcp_commander.agent.session_ops import CommandSessionManager
 from remote_mcp_commander.agent.system_ops import (
     list_processes,
@@ -37,9 +39,11 @@ from remote_mcp_commander.protocol import (
     FileInfoRequest,
     FileReadRequest,
     FileRootListRequest,
+    FileSearchRequest,
     FileWriteRequest,
     GitStatusRequest,
     Heartbeat,
+    PathMutationRequest,
     PingRequest,
     PingResult,
     PortLookupRequest,
@@ -315,6 +319,35 @@ async def agent_loop() -> None:
                                 overwrite=request.overwrite,
                                 expected_sha256=request.expected_sha256,
                                 max_file_bytes=settings.file_max_bytes,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "file_search_request":
+                            request = FileSearchRequest.model_validate(payload)
+                            result = await search_files(
+                                request.request_id,
+                                request.root,
+                                request.query,
+                                roots=roots,
+                                mode=request.mode,
+                                file_glob=request.file_glob,
+                                case_sensitive=request.case_sensitive,
+                                max_results=request.max_results,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "path_mutation_request":
+                            request = PathMutationRequest.model_validate(payload)
+                            result = await mutate_path(
+                                request.request_id,
+                                request.operation,
+                                request.path,
+                                roots=roots,
+                                destination=request.destination,
+                                parents=request.parents,
+                                overwrite=request.overwrite,
                             )
                             await websocket.send(result.model_dump_json())
                             continue

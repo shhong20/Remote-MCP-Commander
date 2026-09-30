@@ -40,9 +40,7 @@ async def wait_for_output(
     raise AssertionError(f"PTY output never contained {expected!r}")
 
 
-async def wait_terminal(
-    manager: PtySessionManager, session_id: str, attempts: int = 200
-):
+async def wait_terminal(manager: PtySessionManager, session_id: str, attempts: int = 200):
     for _ in range(attempts):
         result = await manager.status("status", session_id)
         if result.state != "running":
@@ -63,9 +61,7 @@ async def test_pty_session_is_interactive_and_accepts_input(tmp_path: Path) -> N
     )
     manager = make_manager(exec_search_path=str(tmp_path))
     session_id = "a" * 32
-    started = await manager.start(
-        "start", session_id, ["terminal"], columns=100, rows=30
-    )
+    started = await manager.start("start", session_id, ["terminal"], columns=100, rows=30)
     assert started.state == "running"
     await wait_for_output(manager, session_id, "tty=True")
     await wait_for_output(manager, session_id, "foreground=True")
@@ -92,9 +88,7 @@ async def test_pty_session_resize_updates_terminal(tmp_path: Path) -> None:
     session_id = "b" * 32
     await manager.start("start", session_id, ["terminal"], columns=80, rows=24)
 
-    resized = await manager.resize(
-        "resize", session_id, columns=132, rows=43
-    )
+    resized = await manager.resize("resize", session_id, columns=132, rows=43)
     assert (resized.columns, resized.rows) == (132, 43)
     await manager.input("input", session_id, "\n")
     terminal = await wait_terminal(manager, session_id)
@@ -105,9 +99,7 @@ async def test_pty_session_resize_updates_terminal(tmp_path: Path) -> None:
 async def test_pty_session_enforces_separate_allowlist_and_bare_name(tmp_path: Path) -> None:
     make_fake_terminal(tmp_path, "print('nope')\n")
     manager = make_manager(allowlist=set(), exec_search_path=str(tmp_path))
-    denied = await manager.start(
-        "start", "c" * 32, ["terminal"], columns=80, rows=24
-    )
+    denied = await manager.start("start", "c" * 32, ["terminal"], columns=80, rows=24)
     assert denied.rejected is True
     assert "not allowed" in (denied.error or "")
 
@@ -122,12 +114,9 @@ async def test_pty_session_enforces_separate_allowlist_and_bare_name(tmp_path: P
 async def test_pty_input_and_output_are_bounded(tmp_path: Path) -> None:
     make_fake_terminal(
         tmp_path,
-        "print('abcdefghij', flush=True)\n"
-        "input()\n",
+        "print('abcdefghij', flush=True)\ninput()\n",
     )
-    manager = make_manager(
-        max_output_bytes=5, max_input_bytes=4, exec_search_path=str(tmp_path)
-    )
+    manager = make_manager(max_output_bytes=5, max_input_bytes=4, exec_search_path=str(tmp_path))
     session_id = "e" * 32
     await manager.start("start", session_id, ["terminal"], columns=80, rows=24)
     await wait_for_output(manager, session_id, "abcde")

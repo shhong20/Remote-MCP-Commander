@@ -53,6 +53,7 @@ def test_capabilities_reflect_available_tools_and_allowed_roots(
         "service.action",
         "service.logs",
         "filesystem.discovery",
+        "filesystem.search",
         "file.read",
         "file.write",
         "git.status",
@@ -60,6 +61,13 @@ def test_capabilities_reflect_available_tools_and_allowed_roots(
         "command.session",
     }
     assert result == sorted(expected)
+
+
+def test_personal_mode_advertises_filesystem_mutation(tmp_path: Path) -> None:
+    result = capabilities.detect_capabilities(
+        make_settings(operation_mode="personal"), [tmp_path.resolve()]
+    )
+    assert "filesystem.mutate" in result
 
 
 def test_git_capability_requires_allowed_root(monkeypatch) -> None:
@@ -87,9 +95,7 @@ def test_pty_capability_requires_dedicated_allowlist_and_posix(monkeypatch) -> N
     monkeypatch.setattr(capabilities, "resolve_generic_executable", lambda *args, **kwargs: None)
 
     disabled = capabilities.detect_capabilities(make_settings(), [])
-    enabled = capabilities.detect_capabilities(
-        make_settings(pty_allowed_executables="bash"), []
-    )
+    enabled = capabilities.detect_capabilities(make_settings(pty_allowed_executables="bash"), [])
 
     assert "command.pty" not in disabled
     assert "command.pty" in enabled
