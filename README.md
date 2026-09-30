@@ -153,6 +153,10 @@ Filesystem discovery uses the same allowed-root boundary. Directory listing is n
 
 File tools are deny-by-default until `COMMANDER_ALLOWED_ROOTS_JSON` is configured with absolute directories. Paths are canonicalized before access so symlink escapes outside those roots are rejected. Existing files require `overwrite=true` plus the SHA-256 returned by a prior `read_file`, providing optimistic stale-write protection. The current text-file MVP caps files at 1 MiB and does not expose delete, move, recursive directory, or arbitrary binary transfer operations.
 
+## Personal single-user mode
+
+For a single trusted operator controlling their own unprivileged server account, `COMMANDER_OPERATION_MODE=personal` widens the developer command surface, uses the user PATH/HOME, enables default PTY executables, and defaults filesystem roots to that user's home directory when no roots are configured. Hardened mode remains the default. See `docs/personal-mode.md`.
+
 ## Native deployment
 
 For a long-running host deployment, keep Gateway and MCP services bound to `127.0.0.1` and place Caddy in front for HTTPS/WSS. The repository includes hardened systemd service templates for Gateway/MCP plus a systemd **user** service for each controlled-host Agent.

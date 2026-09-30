@@ -1,3 +1,4 @@
+- [Personal single-user mode](personal-mode.md)
 # Documentation
 
 - [Mutation approval invariants](mutation-approval.md)

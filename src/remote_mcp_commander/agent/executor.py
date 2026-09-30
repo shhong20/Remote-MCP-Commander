@@ -19,9 +19,11 @@ async def execute_argv(
     timeout_s: float,
     max_output_bytes: int,
     exec_search_path: str = TRUSTED_GENERIC_EXEC_PATH,
+    policy_mode: str = "hardened",
+    child_env: dict[str, str] | None = None,
 ) -> CommandResult:
     executable = Path(argv[0]).name
-    policy_error = validate_generic_argv(argv)
+    policy_error = validate_generic_argv(argv, mode=policy_mode)
     if policy_error is not None:
         return CommandResult(request_id=request_id, rejected=True, error=policy_error)
     if executable not in allowlist:
@@ -44,7 +46,7 @@ async def execute_argv(
             *argv[1:],
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env={"PATH": exec_search_path},
+            env=child_env or {"PATH": exec_search_path},
         )
         try:
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout_s)

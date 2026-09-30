@@ -13,6 +13,12 @@ from urllib.parse import urlparse
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from remote_mcp_commander.policy import (
+    PERSONAL_GENERIC_EXECUTABLES,
+    PERSONAL_PTY_EXECUTABLES,
+    TRUSTED_GENERIC_EXEC_PATH,
+)
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_prefix="COMMANDER_", env_file=".env", extra="ignore")
@@ -40,6 +46,7 @@ class Settings(BaseSettings):
     request_timeout_s: float = 15.0
 
     agent_id: str = Field(default="server-01", pattern=r"^[A-Za-z0-9_.-]{1,128}$")
+    operation_mode: Literal["hardened", "personal"] = "hardened"
     gateway_ws: str = "ws://127.0.0.1:8765/ws/agent/server-01"
     allowed_executables: str = "echo,hostname,whoami,uptime"
     max_output_bytes: int = Field(default=65_536, ge=1_024, le=262_144)
@@ -72,12 +79,59 @@ class Settings(BaseSettings):
     mcp_gateway_timeout_s: float = 20.0
 
     @property
+    def personal_mode(self) -> bool:
+        return self.operation_mode == "personal"
+
+    @property
+    def command_search_path(self) -> str:
+        if not self.personal_mode:
+            return TRUSTED_GENERIC_EXEC_PATH
+        raw = os.environ.get("PATH", "")
+        parts: list[str] = []
+        for item in raw.split(os.pathsep):
+            if not item or not Path(item).is_absolute() or item in parts:
+                continue
+            parts.append(item)
+        return os.pathsep.join(parts) or TRUSTED_GENERIC_EXEC_PATH
+
+    @property
+    def command_environment(self) -> dict[str, str]:
+        env = {"PATH": self.command_search_path}
+        if not self.personal_mode:
+            return env
+        for key in (
+            "HOME",
+            "USER",
+            "LOGNAME",
+            "LANG",
+            "LC_ALL",
+            "TERM",
+            "TMPDIR",
+            "XDG_CONFIG_HOME",
+            "XDG_CACHE_HOME",
+            "XDG_DATA_HOME",
+            "SSH_AUTH_SOCK",
+        ):
+            value = os.environ.get(key)
+            if value:
+                env[key] = value
+        return env
+
+    @property
     def executable_allowlist(self) -> set[str]:
-        return {item.strip() for item in self.allowed_executables.split(",") if item.strip()}
+        configured = {item.strip() for item in self.allowed_executables.split(",") if item.strip()}
+        if self.personal_mode:
+            configured.update(PERSONAL_GENERIC_EXECUTABLES)
+        return configured
 
     @property
     def pty_executable_allowlist(self) -> set[str]:
-        return {item.strip() for item in self.pty_allowed_executables.split(",") if item.strip()}
+        configured = {
+            item.strip() for item in self.pty_allowed_executables.split(",") if item.strip()
+        }
+        if self.personal_mode:
+            configured.update(PERSONAL_PTY_EXECUTABLES)
+        return configured
 
     @property
     def pty_agent_policies(self) -> dict[str, set[str]]:
@@ -115,6 +169,8 @@ class Settings(BaseSettings):
         data = json.loads(self.allowed_roots_json)
         if not isinstance(data, list) or not all(isinstance(item, str) for item in data):
             raise ValueError("COMMANDER_ALLOWED_ROOTS_JSON must be a JSON string array")
+        if not data and self.personal_mode:
+            return [str(Path.home())]
         return data
 
     @property

@@ -47,6 +47,8 @@ class CommandSessionManager:
         max_active: int = 4,
         history_limit: int = 100,
         exec_search_path: str = TRUSTED_GENERIC_EXEC_PATH,
+        policy_mode: str = "hardened",
+        child_env: dict[str, str] | None = None,
     ) -> None:
         self.allowlist = allowlist
         self.timeout_s = timeout_s
@@ -54,6 +56,8 @@ class CommandSessionManager:
         self.max_active = max_active
         self.history_limit = history_limit
         self.exec_search_path = exec_search_path
+        self.policy_mode = policy_mode
+        self.child_env = child_env or {"PATH": exec_search_path}
         self._sessions: dict[str, _CommandSession] = {}
         self._lock = asyncio.Lock()
 
@@ -101,7 +105,7 @@ class CommandSessionManager:
         session_id: str,
         argv: list[str],
     ) -> CommandSessionSnapshot:
-        policy_error = validate_generic_argv(argv)
+        policy_error = validate_generic_argv(argv, mode=self.policy_mode)
         if policy_error is not None:
             return self._error_snapshot(request_id, session_id, policy_error)
         executable = Path(argv[0]).name
@@ -136,7 +140,7 @@ class CommandSessionManager:
                     *argv[1:],
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
-                    env={"PATH": self.exec_search_path},
+                    env=self.child_env,
                 )
             except FileNotFoundError:
                 return self._error_snapshot(request_id, session_id, "executable not found")

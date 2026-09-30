@@ -87,6 +87,9 @@ async def agent_loop() -> None:
                     max_output_bytes=settings.max_output_bytes,
                     max_active=settings.session_max_active,
                     history_limit=settings.session_history_limit,
+                    exec_search_path=settings.command_search_path,
+                    policy_mode=settings.operation_mode,
+                    child_env=settings.command_environment,
                 )
                 pty_sessions = PtySessionManager(
                     allowlist=settings.pty_executable_allowlist,
@@ -95,6 +98,8 @@ async def agent_loop() -> None:
                     max_input_bytes=settings.pty_input_max_bytes,
                     max_active=settings.pty_max_active,
                     history_limit=settings.session_history_limit,
+                    exec_search_path=settings.command_search_path,
+                    child_env=settings.command_environment,
                 )
                 hello = AgentHello(
                     agent_id=settings.agent_id,
@@ -358,6 +363,9 @@ async def agent_loop() -> None:
                             allowlist=settings.executable_allowlist,
                             timeout_s=settings.exec_timeout_s,
                             max_output_bytes=settings.max_output_bytes,
+                            exec_search_path=settings.command_search_path,
+                            policy_mode=settings.operation_mode,
+                            child_env=settings.command_environment,
                         )
                         await websocket.send(result.model_dump_json())
                 finally:

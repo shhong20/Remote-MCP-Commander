@@ -78,6 +78,7 @@ class PtySessionManager:
         max_active: int = 1,
         history_limit: int = 100,
         exec_search_path: str = TRUSTED_GENERIC_EXEC_PATH,
+        child_env: dict[str, str] | None = None,
     ) -> None:
         self.allowlist = allowlist
         self.timeout_s = timeout_s
@@ -86,6 +87,7 @@ class PtySessionManager:
         self.max_active = max_active
         self.history_limit = history_limit
         self.exec_search_path = exec_search_path
+        self.child_env = child_env or {"PATH": exec_search_path}
         self._sessions: dict[str, _PtySession] = {}
         self._lock = asyncio.Lock()
 
@@ -105,9 +107,7 @@ class PtySessionManager:
             error=session.error,
         )
 
-    def _error_snapshot(
-        self, request_id: str, session_id: str, error: str
-    ) -> PtySessionSnapshot:
+    def _error_snapshot(self, request_id: str, session_id: str, error: str) -> PtySessionSnapshot:
         return PtySessionSnapshot(
             request_id=request_id,
             session_id=session_id,
@@ -162,9 +162,7 @@ class PtySessionManager:
                 return self._error_snapshot(request_id, session_id, "PTY session history is full")
             active = sum(1 for session in self._sessions.values() if session.state == "running")
             if active >= self.max_active:
-                return self._error_snapshot(
-                    request_id, session_id, "too many active PTY sessions"
-                )
+                return self._error_snapshot(request_id, session_id, "too many active PTY sessions")
             if session_id in self._sessions:
                 return self._error_snapshot(request_id, session_id, "PTY session already exists")
 
@@ -179,10 +177,10 @@ class PtySessionManager:
                     stdout=slave_fd,
                     stderr=slave_fd,
                     env={
-                        "PATH": self.exec_search_path,
-                        "TERM": "xterm-256color",
-                        "LANG": "C.UTF-8",
-                        "LC_ALL": "C.UTF-8",
+                        **self.child_env,
+                        "TERM": self.child_env.get("TERM", "xterm-256color"),
+                        "LANG": self.child_env.get("LANG", "C.UTF-8"),
+                        "LC_ALL": self.child_env.get("LC_ALL", "C.UTF-8"),
                     },
                     preexec_fn=lambda: _prepare_pty_child(slave_fd),
                 )
@@ -347,9 +345,7 @@ class PtySessionManager:
             error=session.error,
         )
 
-    async def input(
-        self, request_id: str, session_id: str, data: str
-    ) -> PtySessionInputResult:
+    async def input(self, request_id: str, session_id: str, data: str) -> PtySessionInputResult:
         session = self._sessions.get(session_id)
         if session is None:
             return PtySessionInputResult(
