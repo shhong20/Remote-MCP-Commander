@@ -74,3 +74,36 @@ async def test_edit_rejects_symlink_and_binary(tmp_path: Path) -> None:
         max_file_bytes=1024,
     )
     assert binary_result.rejected is True
+
+
+@pytest.mark.asyncio
+async def test_edit_rejects_concurrent_replacement(tmp_path: Path, monkeypatch) -> None:
+    from remote_mcp_commander.agent import edit_ops
+
+    path = tmp_path / "race.txt"
+    path.write_text("before target after", encoding="utf-8")
+    original_snapshot = edit_ops._read_snapshot
+    calls = 0
+
+    def racing_snapshot(candidate: Path, limit: int):
+        nonlocal calls
+        calls += 1
+        if calls == 2:
+            replacement = tmp_path / "external.tmp"
+            replacement.write_text("external update", encoding="utf-8")
+            replacement.replace(candidate)
+        return original_snapshot(candidate, limit)
+
+    monkeypatch.setattr(edit_ops, "_read_snapshot", racing_snapshot)
+    result = await edit_ops.edit_text_file(
+        "race",
+        str(path),
+        "target",
+        "changed",
+        roots=[tmp_path],
+        replace_all=False,
+        max_file_bytes=1024,
+    )
+    assert result.rejected is True
+    assert "changed during edit" in (result.error or "")
+    assert path.read_text(encoding="utf-8") == "external update"

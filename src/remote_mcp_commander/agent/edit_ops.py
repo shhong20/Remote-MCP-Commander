@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
 import os
+import stat
 import tempfile
 from pathlib import Path
 
-from remote_mcp_commander.agent.file_ops import file_sha256
 from remote_mcp_commander.protocol import FileEditResult
 
 
@@ -26,6 +27,49 @@ def _resolve_edit_target(raw_path: str, roots: list[Path]) -> Path:
     return candidate
 
 
+def _read_snapshot(path: Path, max_file_bytes: int) -> tuple[bytes, int, str, tuple[int, int]]:
+    flags = os.O_RDONLY
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    fd = os.open(path, flags)
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode):
+            raise PermissionError("edit target must remain a regular file")
+        if before.st_size > max_file_bytes:
+            raise ValueError("file exceeds size limit")
+        chunks: list[bytes] = []
+        remaining = max_file_bytes + 1
+        while remaining > 0:
+            chunk = os.read(fd, min(131_072, remaining))
+            if not chunk:
+                break
+            chunks.append(chunk)
+            remaining -= len(chunk)
+        raw = b"".join(chunks)
+        after = os.fstat(fd)
+        if len(raw) > max_file_bytes:
+            raise ValueError("file exceeds size limit")
+        if (
+            before.st_dev,
+            before.st_ino,
+            before.st_size,
+            before.st_mtime_ns,
+            before.st_ctime_ns,
+        ) != (
+            after.st_dev,
+            after.st_ino,
+            after.st_size,
+            after.st_mtime_ns,
+            after.st_ctime_ns,
+        ):
+            raise RuntimeError("file changed during read")
+        digest = hashlib.sha256(raw).hexdigest()
+        return raw, stat.S_IMODE(before.st_mode), digest, (before.st_dev, before.st_ino)
+    finally:
+        os.close(fd)
+
+
 def _edit_file_sync(
     request_id: str,
     raw_path: str,
@@ -38,13 +82,10 @@ def _edit_file_sync(
 ) -> FileEditResult:
     try:
         path = _resolve_edit_target(raw_path, roots)
-        if path.stat().st_size > max_file_bytes:
-            raise ValueError("file exceeds size limit")
-        original_raw = path.read_bytes()
+        original_raw, mode, original_hash, original_identity = _read_snapshot(path, max_file_bytes)
         if b"\x00" in original_raw:
             raise ValueError("binary files are not supported")
         original = original_raw.decode("utf-8")
-        original_hash = file_sha256(path)
         occurrences = original.count(old_text)
         if occurrences == 0:
             raise ValueError("old_text was not found")
@@ -55,7 +96,6 @@ def _edit_file_sync(
         encoded = updated.encode("utf-8")
         if len(encoded) > max_file_bytes:
             raise ValueError("edited file exceeds size limit")
-        mode = path.stat().st_mode & 0o777
         fd, temp_name = tempfile.mkstemp(prefix=".remote-mcp-edit-", dir=path.parent)
         temp_path = Path(temp_name)
         try:
@@ -65,7 +105,8 @@ def _edit_file_sync(
                 os.fsync(handle.fileno())
             if os.name != "nt":
                 os.chmod(temp_path, mode)
-            if path.is_symlink() or file_sha256(path) != original_hash:
+            _, _, current_hash, current_identity = _read_snapshot(path, max_file_bytes)
+            if current_hash != original_hash or current_identity != original_identity:
                 raise RuntimeError("file changed during edit")
             os.replace(temp_path, path)
         finally:
@@ -75,7 +116,7 @@ def _edit_file_sync(
             path=str(path),
             replacements=replacements,
             bytes_written=len(encoded),
-            sha256=file_sha256(path),
+            sha256=hashlib.sha256(encoded).hexdigest(),
         )
     except (OSError, PermissionError, UnicodeDecodeError, ValueError, RuntimeError) as exc:
         return FileEditResult(
