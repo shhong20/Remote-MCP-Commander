@@ -12,3 +12,5 @@ htmlcov/
 .idea/
 .vscode/
 dist/
+.runtime/
+build/
