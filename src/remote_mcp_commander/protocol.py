@@ -28,6 +28,8 @@ class CommandResult(BaseModel):
     returncode: int | None = None
     stdout: str = ""
     stderr: str = ""
+    stdout_truncated: bool = False
+    stderr_truncated: bool = False
     timed_out: bool = False
     rejected: bool = False
     error: str | None = None

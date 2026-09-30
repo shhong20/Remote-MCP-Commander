@@ -30,3 +30,9 @@ Configuration:
 - `COMMANDER_MAX_OUTPUT_BYTES` — bounded stdout and stderr per stream; configuration is capped at 256 KiB.
 
 This is not a PTY: there is no stdin streaming, shell expansion, terminal emulation, detached background job, or reconnect-to-running-session behavior.
+
+## Concurrent one-shot execution
+
+Version 0.31 dispatches bounded one-shot `execute` requests in background tasks instead of awaiting them in the Agent WebSocket receive loop. Up to `COMMANDER_SESSION_MAX_ACTIVE` one-shot commands may run concurrently; excess requests fail quickly without blocking other Agent operations.
+
+One-shot stdout/stderr are drained incrementally and retained only up to `COMMANDER_MAX_OUTPUT_BYTES` per stream. Results expose `stdout_truncated` / `stderr_truncated`. POSIX children start in a new session; timeout, Agent disconnect, or dispatcher cancellation terminates the process group instead of only the direct child.

@@ -11,10 +11,10 @@ from remote_mcp_commander import __version__
 from remote_mcp_commander.agent.capabilities import detect_capabilities
 from remote_mcp_commander.agent.diagnostics import lookup_port, service_logs, system_health
 from remote_mcp_commander.agent.edit_ops import edit_text_file
-from remote_mcp_commander.agent.executor import execute_argv
 from remote_mcp_commander.agent.file_ops import allowed_roots, read_text_file, write_text_file
 from remote_mcp_commander.agent.filesystem_ops import file_info, list_directory, list_file_roots
 from remote_mcp_commander.agent.git_ops import git_status
+from remote_mcp_commander.agent.one_shot import OneShotCommandDispatcher
 from remote_mcp_commander.agent.path_ops import mutate_path
 from remote_mcp_commander.agent.pty_ops import PtySessionManager
 from remote_mcp_commander.agent.search_ops import search_files
@@ -105,6 +105,15 @@ async def agent_loop() -> None:
                     max_active=settings.pty_max_active,
                     history_limit=settings.session_history_limit,
                     exec_search_path=settings.command_search_path,
+                    child_env=settings.command_environment,
+                )
+                one_shot = OneShotCommandDispatcher(
+                    allowlist=settings.executable_allowlist,
+                    timeout_s=settings.exec_timeout_s,
+                    max_output_bytes=settings.max_output_bytes,
+                    max_active=settings.session_max_active,
+                    exec_search_path=settings.command_search_path,
+                    policy_mode=settings.operation_mode,
                     child_env=settings.command_environment,
                 )
                 hello = AgentHello(
@@ -406,20 +415,14 @@ async def agent_loop() -> None:
                         if message_type != "command_request":
                             continue
                         request = CommandRequest.model_validate(payload)
-                        result = await execute_argv(
-                            request.request_id,
-                            request.argv,
-                            allowlist=settings.executable_allowlist,
-                            timeout_s=settings.exec_timeout_s,
-                            max_output_bytes=settings.max_output_bytes,
-                            exec_search_path=settings.command_search_path,
-                            policy_mode=settings.operation_mode,
-                            child_env=settings.command_environment,
-                        )
-                        await websocket.send(result.model_dump_json())
+                        await one_shot.submit(request, websocket.send)
                 finally:
                     heartbeat_task.cancel()
-                    await asyncio.gather(sessions.cancel_all(), pty_sessions.cancel_all())
+                    await asyncio.gather(
+                        sessions.cancel_all(),
+                        pty_sessions.cancel_all(),
+                        one_shot.cancel_all(),
+                    )
                     await asyncio.gather(heartbeat_task, return_exceptions=True)
         except (OSError, websockets.ConnectionClosed):
             await asyncio.sleep(2)
