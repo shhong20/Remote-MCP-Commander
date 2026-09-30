@@ -16,8 +16,10 @@ from remote_mcp_commander.protocol import (
     AgentInfo,
     CommandResult,
     CommandSessionDiscardResult,
+    CommandSessionInputResult,
     CommandSessionOutput,
     CommandSessionSnapshot,
+    CommandSessionStdinCloseResult,
     DirectoryListResult,
     DirectoryTreeResult,
     FileAppendResult,
@@ -182,6 +184,20 @@ def build_mcp(settings: Settings) -> MCPServer:
     async def cancel_command(agent_id: str, session_id: str) -> CommandSessionSnapshot:
         """Cancel a running command session owned by the current Agent connection."""
         return await GatewayClient(settings).cancel_command_session(agent_id, session_id)
+
+    @server.tool()
+    async def write_command_input(
+        agent_id: str, session_id: str, data: str
+    ) -> CommandSessionInputResult:
+        """Write bounded UTF-8 stdin to a running command session."""
+        return await GatewayClient(settings).write_command_input(agent_id, session_id, data)
+
+    @server.tool()
+    async def close_command_stdin(
+        agent_id: str, session_id: str
+    ) -> CommandSessionStdinCloseResult:
+        """Close a running command session stdin to deliver EOF."""
+        return await GatewayClient(settings).close_command_stdin(agent_id, session_id)
 
     @server.tool()
     async def command_output(

@@ -67,6 +67,7 @@ def test_capabilities_reflect_available_tools_and_allowed_roots(
         "git.status",
         "command.execute",
         "command.session",
+        "command.stdin",
         "command.session_list",
     }
     assert result == sorted(expected)

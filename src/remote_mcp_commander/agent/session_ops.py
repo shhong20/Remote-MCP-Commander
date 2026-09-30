@@ -17,9 +17,11 @@ from remote_mcp_commander.policy import (
 )
 from remote_mcp_commander.protocol import (
     CommandSessionDiscardResult,
+    CommandSessionInputResult,
     CommandSessionOutput,
     CommandSessionSnapshot,
     CommandSessionState,
+    CommandSessionStdinCloseResult,
     RuntimeSessionInfo,
 )
 
@@ -40,6 +42,7 @@ class _CommandSession:
     stderr_truncated: bool = False
     error: str | None = None
     cancel_requested: bool = False
+    stdin_closed: bool = False
     task: asyncio.Task[None] | None = None
 
 
@@ -52,6 +55,7 @@ class CommandSessionManager:
         max_output_bytes: int,
         max_active: int = 4,
         history_limit: int = 100,
+        max_input_bytes: int = 16_384,
         exec_search_path: str = TRUSTED_GENERIC_EXEC_PATH,
         policy_mode: str = "hardened",
         child_env: dict[str, str] | None = None,
@@ -62,6 +66,7 @@ class CommandSessionManager:
         self.max_output_bytes = max_output_bytes
         self.max_active = max_active
         self.history_limit = history_limit
+        self.max_input_bytes = max_input_bytes
         self.exec_search_path = exec_search_path
         self.policy_mode = policy_mode
         self.child_env = child_env or {"PATH": exec_search_path}
@@ -159,6 +164,7 @@ class CommandSessionManager:
                 process = await asyncio.create_subprocess_exec(
                     resolved,
                     *argv[1:],
+                    stdin=asyncio.subprocess.PIPE,
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     env=process_env,
@@ -270,9 +276,7 @@ class CommandSessionManager:
             else:
                 terminal_state = "completed"
         except TimeoutError:
-            if session.process.returncode is None:
-                session.process.kill()
-            await session.process.wait()
+            await self._terminate_process(session)
             session.returncode = session.process.returncode
             terminal_state = "timed_out"
             terminal_error = "session timed out"
@@ -291,9 +295,73 @@ class CommandSessionManager:
             if capture_error is not None and terminal_state == "completed":
                 terminal_state = "failed"
                 terminal_error = capture_error
+            session.stdin_closed = True
             session.state = terminal_state
             session.error = terminal_error
             session.finished_at = datetime.now(UTC)
+
+    async def write_input(
+        self, request_id: str, session_id: str, data: str
+    ) -> CommandSessionInputResult:
+        session = self._sessions.get(session_id)
+        if session is None:
+            return CommandSessionInputResult(
+                request_id=request_id, session_id=session_id, rejected=True,
+                error="session not found",
+            )
+        encoded = data.encode("utf-8")
+        if len(encoded) > self.max_input_bytes:
+            return CommandSessionInputResult(
+                request_id=request_id, session_id=session_id, rejected=True,
+                error="input exceeds size limit",
+            )
+        writer = session.process.stdin
+        if session.state != "running" or writer is None or session.stdin_closed:
+            return CommandSessionInputResult(
+                request_id=request_id, session_id=session_id, rejected=True,
+                error="session stdin is not writable",
+            )
+        try:
+            writer.write(encoded)
+            await writer.drain()
+        except (BrokenPipeError, ConnectionResetError):
+            session.stdin_closed = True
+            return CommandSessionInputResult(
+                request_id=request_id, session_id=session_id, rejected=True,
+                error="session stdin is closed",
+            )
+        return CommandSessionInputResult(
+            request_id=request_id, session_id=session_id, accepted_bytes=len(encoded)
+        )
+
+    async def close_stdin(
+        self, request_id: str, session_id: str
+    ) -> CommandSessionStdinCloseResult:
+        session = self._sessions.get(session_id)
+        if session is None:
+            return CommandSessionStdinCloseResult(
+                request_id=request_id, session_id=session_id, rejected=True,
+                error="session not found",
+            )
+        if session.stdin_closed:
+            return CommandSessionStdinCloseResult(
+                request_id=request_id, session_id=session_id, closed=True
+            )
+        writer = session.process.stdin
+        if writer is None:
+            return CommandSessionStdinCloseResult(
+                request_id=request_id, session_id=session_id, rejected=True,
+                error="session stdin is unavailable",
+            )
+        writer.close()
+        try:
+            await writer.wait_closed()
+        except (BrokenPipeError, ConnectionResetError):
+            pass
+        session.stdin_closed = True
+        return CommandSessionStdinCloseResult(
+            request_id=request_id, session_id=session_id, closed=True
+        )
 
     async def list_infos(self, *, include_completed: bool) -> list[RuntimeSessionInfo]:
         sessions = list(self._sessions.values())
@@ -377,13 +445,8 @@ class CommandSessionManager:
             return self._snapshot(request_id, session)
 
         session.cancel_requested = True
-        session.process.terminate()
-        try:
-            await asyncio.wait_for(asyncio.shield(session.task), timeout=2)
-        except TimeoutError:
-            if session.process.returncode is None:
-                session.process.kill()
-            await session.task
+        await self._terminate_process(session)
+        await asyncio.shield(session.task)
         return self._snapshot(request_id, session)
 
     async def discard(self, request_id: str, session_id: str) -> CommandSessionDiscardResult:

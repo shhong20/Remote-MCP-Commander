@@ -51,9 +51,11 @@ from remote_mcp_commander.protocol import (
     CommandRequest,
     CommandSessionCancelRequest,
     CommandSessionDiscardRequest,
+    CommandSessionInputRequest,
     CommandSessionOutputRequest,
     CommandSessionStartRequest,
     CommandSessionStatusRequest,
+    CommandSessionStdinCloseRequest,
     DirectoryListRequest,
     DirectoryTreeRequest,
     FileAppendRequest,
@@ -124,6 +126,7 @@ async def agent_loop() -> None:
                     max_output_bytes=settings.max_output_bytes,
                     max_active=settings.session_max_active,
                     history_limit=settings.session_history_limit,
+                    max_input_bytes=settings.session_input_max_bytes,
                     exec_search_path=settings.command_search_path,
                     policy_mode=settings.operation_mode,
                     child_env=settings.command_environment,
@@ -263,6 +266,22 @@ async def agent_loop() -> None:
                         if message_type == "command_session_cancel_request":
                             request = CommandSessionCancelRequest.model_validate(payload)
                             result = await sessions.cancel(request.request_id, request.session_id)
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "command_session_input_request":
+                            request = CommandSessionInputRequest.model_validate(payload)
+                            result = await sessions.write_input(
+                                request.request_id, request.session_id, request.data
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "command_session_stdin_close_request":
+                            request = CommandSessionStdinCloseRequest.model_validate(payload)
+                            result = await sessions.close_stdin(
+                                request.request_id, request.session_id
+                            )
                             await websocket.send(result.model_dump_json())
                             continue
 

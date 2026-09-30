@@ -263,3 +263,93 @@ async def test_command_session_listing_filters_running_and_completed(tmp_path: P
     assert by_id[completed_id].state == "completed"
     assert by_id[completed_id].output_chars == len("done\n")
     await manager.cancel_all()
+
+
+@pytest.mark.asyncio
+async def test_command_session_accepts_stdin_until_explicit_eof(tmp_path: Path) -> None:
+    make_fake_uptime(
+        tmp_path,
+        "import sys\ndata = sys.stdin.read()\nprint('got:' + data, end='')\n",
+    )
+    manager = make_manager(timeout_s=2.0, exec_search_path=str(tmp_path))
+    session_id = "5" * 32
+    started = await manager.start("start", session_id, ["uptime"])
+    assert started.state == "running"
+
+    first = await manager.write_input("input-1", session_id, "hello\n")
+    second = await manager.write_input("input-2", session_id, "world\n")
+    assert first.accepted_bytes == len(b"hello\n")
+    assert second.accepted_bytes == len(b"world\n")
+
+    closed = await manager.close_stdin("close", session_id)
+    assert closed.closed is True
+    result = await wait_terminal(manager, session_id)
+    assert result.state == "completed"
+    assert result.stdout == "got:hello\nworld\n"
+
+    after_close = await manager.write_input("late", session_id, "nope")
+    assert after_close.rejected is True
+    assert "not writable" in (after_close.error or "")
+
+
+@pytest.mark.asyncio
+async def test_command_session_input_byte_limit_and_close_idempotency(tmp_path: Path) -> None:
+    make_fake_uptime(tmp_path, "import sys\nsys.stdin.read()\n")
+    manager = make_manager(
+        timeout_s=2.0, max_input_bytes=4, exec_search_path=str(tmp_path)
+    )
+    session_id = "6" * 32
+    await manager.start("start", session_id, ["uptime"])
+
+    rejected = await manager.write_input("large", session_id, "12345")
+    assert rejected.rejected is True
+    assert "size limit" in (rejected.error or "")
+    first = await manager.close_stdin("close-1", session_id)
+    second = await manager.close_stdin("close-2", session_id)
+    assert first.closed is True
+    assert second.closed is True
+    await wait_terminal(manager, session_id)
+
+
+@pytest.mark.asyncio
+async def test_timeout_uses_process_group_termination_helper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    make_fake_uptime(tmp_path, "import time\ntime.sleep(30)\n")
+    manager = make_manager(timeout_s=0.05, exec_search_path=str(tmp_path))
+    called = 0
+    original = manager._terminate_process
+
+    async def tracked(session) -> None:
+        nonlocal called
+        called += 1
+        await original(session)
+
+    monkeypatch.setattr(manager, "_terminate_process", tracked)
+    session_id = "7" * 32
+    await manager.start("start", session_id, ["uptime"])
+    result = await wait_terminal(manager, session_id)
+    assert result.state == "timed_out"
+    assert called == 1
+
+
+@pytest.mark.asyncio
+async def test_cancel_uses_process_group_termination_helper(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    make_fake_uptime(tmp_path, "import time\ntime.sleep(30)\n")
+    manager = make_manager(timeout_s=60.0, exec_search_path=str(tmp_path))
+    called = 0
+    original = manager._terminate_process
+
+    async def tracked(session) -> None:
+        nonlocal called
+        called += 1
+        await original(session)
+
+    monkeypatch.setattr(manager, "_terminate_process", tracked)
+    session_id = "8" * 32
+    await manager.start("start", session_id, ["uptime"])
+    result = await manager.cancel("cancel", session_id)
+    assert result.state == "cancelled"
+    assert called == 1
