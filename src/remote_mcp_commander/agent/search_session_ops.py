@@ -6,6 +6,8 @@ from dataclasses import dataclass
 from remote_mcp_commander.agent.search_ops import search_files
 from remote_mcp_commander.protocol import (
     FileSearchMatch,
+    FileSearchSessionInfo,
+    FileSearchSessionListResult,
     FileSearchSessionPage,
     FileSearchSessionStopResult,
 )
@@ -14,6 +16,12 @@ from remote_mcp_commander.protocol import (
 @dataclass
 class _SearchSession:
     session_id: str
+    root: str
+    query: str
+    mode: str
+    file_glob: str | None
+    case_sensitive: bool
+    include_hidden: bool
     matches: list[FileSearchMatch]
     scanned_files: int
     truncated: bool
@@ -41,20 +49,34 @@ class FileSearchSessionManager:
         request_id: str,
         session: _SearchSession,
         limit: int,
+        offset: int | None = None,
     ) -> FileSearchSessionPage:
-        start = session.cursor
-        end = min(len(session.matches), start + limit)
+        total = len(session.matches)
+        if offset is None:
+            start = session.cursor
+            advance_cursor = True
+        elif offset < 0:
+            start = max(0, total + offset)
+            advance_cursor = False
+        else:
+            start = min(offset, total)
+            advance_cursor = False
+        end = min(total, start + limit)
         matches = session.matches[start:end]
-        session.cursor = end
-        remaining = len(session.matches) - end
+        if advance_cursor:
+            session.cursor = end
+        remaining = total - end
         return FileSearchSessionPage(
             request_id=request_id,
             session_id=session.session_id,
             matches=matches,
             scanned_files=session.scanned_files,
             returned_count=len(matches),
+            total_matches=total,
+            offset=start,
+            next_offset=end,
             remaining=remaining,
-            exhausted=remaining == 0,
+            exhausted=end >= total,
             truncated=session.truncated,
         )
 
@@ -94,6 +116,12 @@ class FileSearchSessionManager:
                 self._sessions.pop(oldest, None)
             session = _SearchSession(
                 session_id=session_id,
+                root=root,
+                query=query,
+                mode=mode,
+                file_glob=file_glob,
+                case_sensitive=case_sensitive,
+                include_hidden=include_hidden,
                 matches=result.matches,
                 scanned_files=result.scanned_files,
                 truncated=result.truncated,
@@ -101,12 +129,34 @@ class FileSearchSessionManager:
             self._sessions[session_id] = session
             return self._page(request_id, session, page_size)
 
-    async def more(self, request_id: str, session_id: str, limit: int) -> FileSearchSessionPage:
+    async def more(
+        self, request_id: str, session_id: str, limit: int, offset: int | None = None
+    ) -> FileSearchSessionPage:
         async with self._lock:
             session = self._sessions.get(session_id)
             if session is None:
                 return self._error_page(request_id, session_id, "search session not found")
-            return self._page(request_id, session, limit)
+            return self._page(request_id, session, limit, offset=offset)
+
+    async def list_sessions(self, request_id: str) -> FileSearchSessionListResult:
+        async with self._lock:
+            sessions = [
+                FileSearchSessionInfo(
+                    session_id=item.session_id,
+                    root=item.root,
+                    query=item.query,
+                    mode=item.mode,
+                    file_glob=item.file_glob,
+                    case_sensitive=item.case_sensitive,
+                    include_hidden=item.include_hidden,
+                    scanned_files=item.scanned_files,
+                    total_matches=len(item.matches),
+                    cursor=item.cursor,
+                    truncated=item.truncated,
+                )
+                for item in self._sessions.values()
+            ]
+        return FileSearchSessionListResult(request_id=request_id, sessions=sessions)
 
     async def stop(self, request_id: str, session_id: str) -> FileSearchSessionStopResult:
         async with self._lock:

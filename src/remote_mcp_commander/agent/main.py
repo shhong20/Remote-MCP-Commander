@@ -54,6 +54,7 @@ from remote_mcp_commander.protocol import (
     FileReadRequest,
     FileRootListRequest,
     FileSearchRequest,
+    FileSearchSessionListRequest,
     FileSearchSessionMoreRequest,
     FileSearchSessionStartRequest,
     FileSearchSessionStopRequest,
@@ -409,8 +410,17 @@ async def agent_loop() -> None:
                         if message_type == "file_search_session_more_request":
                             request = FileSearchSessionMoreRequest.model_validate(payload)
                             result = await search_sessions.more(
-                                request.request_id, request.session_id, request.limit
+                                request.request_id,
+                                request.session_id,
+                                request.limit,
+                                offset=request.offset,
                             )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "file_search_session_list_request":
+                            request = FileSearchSessionListRequest.model_validate(payload)
+                            result = await search_sessions.list_sessions(request.request_id)
                             await websocket.send(result.model_dump_json())
                             continue
 

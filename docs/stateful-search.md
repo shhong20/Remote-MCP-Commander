@@ -20,3 +20,15 @@ Remote MCP Commander keeps the existing one-shot `search_files` tool and also ex
 `exhausted=true` means there are no more cached matches in the current search session. `truncated=true` means the bounded scan or match ceiling was reached, so additional matches may exist outside the retained result set.
 
 Search sessions are connection-local and disappear when the Agent reconnects. Older Agents that do not advertise `filesystem.search_session` are rejected by the Gateway rather than silently falling back to one-shot search.
+
+## Session navigation
+
+`list_searches(agent_id)` returns every retained search with its query, root, mode, total cached matches, current cursor, and truncation state.
+
+`get_more_search_results` supports two access modes:
+
+- omit `offset` to consume from the session cursor and advance it;
+- provide a non-negative `offset` to re-read an exact range without moving the cursor;
+- provide a negative `offset` (for example `-20`) to read from the tail of the cached result set without moving the cursor.
+
+The returned page includes `offset`, `next_offset`, and `total_matches`, so callers can navigate deterministically. Explicit offset reads never modify the default sequential cursor.

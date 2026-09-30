@@ -249,3 +249,44 @@ async def test_stateful_search_skips_hidden_paths_by_default(tmp_path: Path) -> 
         "alpha-inside.txt",
         "alpha-visible.txt",
     }
+
+
+@pytest.mark.asyncio
+async def test_search_session_supports_explicit_offsets_tail_and_listing(tmp_path: Path) -> None:
+    for index in range(6):
+        (tmp_path / f"alpha-{index}.txt").write_text(str(index))
+    manager = FileSearchSessionManager(roots=[tmp_path.resolve()])
+    session_id = "9" * 32
+    first = await manager.start(
+        "start",
+        session_id,
+        str(tmp_path),
+        "alpha",
+        mode="files",
+        file_glob=None,
+        case_sensitive=False,
+        page_size=2,
+        max_results=20,
+    )
+    assert first.offset == 0
+    assert first.next_offset == 2
+    assert first.total_matches == 6
+
+    explicit = await manager.more("explicit", session_id, 2, offset=0)
+    assert [item.path for item in explicit.matches] == [item.path for item in first.matches]
+    listed = await manager.list_sessions("list-1")
+    assert listed.sessions[0].cursor == 2
+    assert listed.sessions[0].total_matches == 6
+
+    tail = await manager.more("tail", session_id, 2, offset=-2)
+    assert tail.offset == 4
+    assert tail.next_offset == 6
+    assert [Path(item.path).name for item in tail.matches] == ["alpha-4.txt", "alpha-5.txt"]
+    listed_again = await manager.list_sessions("list-2")
+    assert listed_again.sessions[0].cursor == 2
+
+    cursor_page = await manager.more("cursor", session_id, 2)
+    assert cursor_page.offset == 2
+    assert cursor_page.next_offset == 4
+    final_listing = await manager.list_sessions("list-3")
+    assert final_listing.sessions[0].cursor == 4

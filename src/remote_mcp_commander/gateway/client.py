@@ -19,6 +19,7 @@ from remote_mcp_commander.protocol import (
     FileReadResult,
     FileRootListResult,
     FileSearchResult,
+    FileSearchSessionListResult,
     FileSearchSessionPage,
     FileSearchSessionStopResult,
     FileWriteResult,
@@ -442,13 +443,22 @@ class GatewayClient:
         )
         return FileSearchSessionPage.model_validate(payload)
 
+    async def list_search_sessions(self, agent_id: str) -> FileSearchSessionListResult:
+        payload = await self._request("GET", f"/api/v1/agents/{agent_id}/files/search/sessions")
+        return FileSearchSessionListResult.model_validate(payload)
+
     async def more_search_session(
-        self, agent_id: str, session_id: str, *, limit: int = 50
+        self,
+        agent_id: str,
+        session_id: str,
+        *,
+        offset: int | None = None,
+        limit: int = 50,
     ) -> FileSearchSessionPage:
         payload = await self._request(
             "POST",
             f"/api/v1/agents/{agent_id}/files/search/sessions/{session_id}/more",
-            json_body={"limit": limit},
+            json_body={"offset": offset, "limit": limit},
         )
         return FileSearchSessionPage.model_validate(payload)
 
