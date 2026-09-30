@@ -548,3 +548,51 @@ async def test_read_many_files_sends_bounded_payload() -> None:
     payload = requests[0].content
     assert b'"max_bytes_per_file":1234' in payload
     assert b'"max_total_bytes":4321' in payload
+
+
+@pytest.mark.asyncio
+async def test_stateful_search_client_uses_session_routes() -> None:
+    requests: list[httpx.Request] = []
+    session_id = "e" * 32
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/stop"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "stop",
+                    "session_id": session_id,
+                    "stopped": True,
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "page",
+                "session_id": session_id,
+                "matches": [],
+                "returned_count": 0,
+                "remaining": 0,
+                "exhausted": True,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    await client.start_search_session(
+        "server-01",
+        "/srv/project",
+        "needle",
+        mode="content",
+        page_size=25,
+        max_results=500,
+    )
+    await client.more_search_session("server-01", session_id, limit=30)
+    await client.stop_search_session("server-01", session_id)
+
+    assert requests[0].url.path.endswith("/files/search/sessions")
+    assert b'"page_size":25' in requests[0].content
+    assert b'"max_results":500' in requests[0].content
+    assert requests[1].url.path.endswith(f"/{session_id}/more")
+    assert b'"limit":30' in requests[1].content
+    assert requests[2].url.path.endswith(f"/{session_id}/stop")

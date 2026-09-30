@@ -349,6 +349,71 @@ class FileSearchBody(BaseModel):
     max_results: int = Field(default=100, ge=1, le=200)
 
 
+class FileSearchSessionStartRequest(BaseModel):
+    type: Literal["file_search_session_start_request"] = "file_search_session_start_request"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    root: str = Field(min_length=1, max_length=4096)
+    query: str = Field(min_length=1, max_length=256)
+    mode: FileSearchMode = "files"
+    file_glob: str | None = Field(default=None, max_length=256)
+    case_sensitive: bool = False
+    include_hidden: bool = False
+    page_size: int = Field(default=50, ge=1, le=200)
+    max_results: int = Field(default=1000, ge=1, le=2000)
+
+
+class FileSearchSessionMoreRequest(BaseModel):
+    type: Literal["file_search_session_more_request"] = "file_search_session_more_request"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    limit: int = Field(default=50, ge=1, le=200)
+
+
+class FileSearchSessionStopRequest(BaseModel):
+    type: Literal["file_search_session_stop_request"] = "file_search_session_stop_request"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+
+
+class FileSearchSessionPage(BaseModel):
+    type: Literal["file_search_session_page"] = "file_search_session_page"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    matches: list[FileSearchMatch] = Field(default_factory=list)
+    scanned_files: int = 0
+    returned_count: int = 0
+    remaining: int = 0
+    exhausted: bool = False
+    truncated: bool = False
+    rejected: bool = False
+    error: str | None = None
+
+
+class FileSearchSessionStopResult(BaseModel):
+    type: Literal["file_search_session_stop_result"] = "file_search_session_stop_result"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    stopped: bool = False
+    rejected: bool = False
+    error: str | None = None
+
+
+class FileSearchSessionStartBody(BaseModel):
+    root: str = Field(min_length=1, max_length=4096)
+    query: str = Field(min_length=1, max_length=256)
+    mode: FileSearchMode = "files"
+    file_glob: str | None = Field(default=None, max_length=256)
+    case_sensitive: bool = False
+    include_hidden: bool = False
+    page_size: int = Field(default=50, ge=1, le=200)
+    max_results: int = Field(default=1000, ge=1, le=2000)
+
+
+class FileSearchSessionMoreBody(BaseModel):
+    limit: int = Field(default=50, ge=1, le=200)
+
+
 class PathMutationRequest(BaseModel):
     type: Literal["path_mutation_request"] = "path_mutation_request"
     request_id: str

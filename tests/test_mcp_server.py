@@ -39,6 +39,9 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "write_file",
         "edit_file",
         "search_files",
+        "start_search",
+        "get_more_search_results",
+        "stop_search",
         "create_directory",
         "copy_file",
         "move_path",
@@ -220,3 +223,22 @@ async def test_read_files_schema_is_bounded() -> None:
     assert set(schema["required"]) == {"agent_id", "paths"}
     assert schema["properties"]["max_bytes_per_file"]["default"] == 32768
     assert schema["properties"]["max_total_bytes"]["default"] == 262144
+
+
+@pytest.mark.asyncio
+async def test_stateful_search_tools_use_bounded_schema() -> None:
+    server = build_mcp(make_settings())
+    async with Client(server) as client:
+        result = await client.list_tools()
+
+    tools = {tool.name: tool for tool in result.tools}
+    start = tools["start_search"].input_schema
+    assert set(start["required"]) == {"agent_id", "root", "query"}
+    assert start["properties"]["include_hidden"]["default"] is False
+    assert start["properties"]["page_size"]["default"] == 50
+    assert start["properties"]["max_results"]["default"] == 1000
+    more = tools["get_more_search_results"].input_schema
+    assert set(more["required"]) == {"agent_id", "session_id"}
+    assert more["properties"]["limit"]["default"] == 50
+    stop = tools["stop_search"].input_schema
+    assert set(stop["required"]) == {"agent_id", "session_id"}

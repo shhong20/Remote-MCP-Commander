@@ -25,6 +25,8 @@ from remote_mcp_commander.protocol import (
     FileReadResult,
     FileRootListResult,
     FileSearchResult,
+    FileSearchSessionPage,
+    FileSearchSessionStopResult,
     FileWriteResult,
     GitStatusResult,
     PathMutationResult,
@@ -323,6 +325,43 @@ def build_mcp(settings: Settings) -> MCPServer:
             case_sensitive=case_sensitive,
             max_results=max_results,
         )
+
+    @server.tool()
+    async def start_search(
+        agent_id: str,
+        root: str,
+        query: str,
+        mode: str = "files",
+        file_glob: str | None = None,
+        case_sensitive: bool = False,
+        include_hidden: bool = False,
+        page_size: int = 50,
+        max_results: int = 1000,
+    ) -> FileSearchSessionPage:
+        """Start a bounded stateful file/content search and return the first page."""
+        return await GatewayClient(settings).start_search_session(
+            agent_id,
+            root,
+            query,
+            mode=mode,
+            file_glob=file_glob,
+            case_sensitive=case_sensitive,
+            include_hidden=include_hidden,
+            page_size=page_size,
+            max_results=max_results,
+        )
+
+    @server.tool()
+    async def get_more_search_results(
+        agent_id: str, session_id: str, limit: int = 50
+    ) -> FileSearchSessionPage:
+        """Read the next bounded page from a stateful search session."""
+        return await GatewayClient(settings).more_search_session(agent_id, session_id, limit=limit)
+
+    @server.tool()
+    async def stop_search(agent_id: str, session_id: str) -> FileSearchSessionStopResult:
+        """Stop and discard a stateful search session."""
+        return await GatewayClient(settings).stop_search_session(agent_id, session_id)
 
     @server.tool()
     async def create_directory(

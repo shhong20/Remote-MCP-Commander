@@ -87,6 +87,13 @@ from remote_mcp_commander.protocol import (
     FileSearchBody,
     FileSearchRequest,
     FileSearchResult,
+    FileSearchSessionMoreBody,
+    FileSearchSessionMoreRequest,
+    FileSearchSessionPage,
+    FileSearchSessionStartBody,
+    FileSearchSessionStartRequest,
+    FileSearchSessionStopRequest,
+    FileSearchSessionStopResult,
     FileWriteBody,
     FileWriteRequest,
     FileWriteResult,
@@ -152,6 +159,8 @@ AgentReply = (
     | FileWriteResult
     | FileEditResult
     | FileSearchResult
+    | FileSearchSessionPage
+    | FileSearchSessionStopResult
     | PathMutationResult
     | ProcessListResult
     | ServiceStatusResult
@@ -1502,6 +1511,116 @@ async def search_agent_files(
         connection.pending.pop(request_id, None)
 
 
+@app.post(
+    "/api/v1/agents/{agent_id}/files/search/sessions",
+    dependencies=[Depends(require_control_token)],
+)
+async def start_file_search_session(
+    agent_id: str, body: FileSearchSessionStartBody, settings: SettingsDep
+) -> FileSearchSessionPage:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "filesystem.search_session")
+    request_id = uuid.uuid4().hex
+    session_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = FileSearchSessionStartRequest(
+            request_id=request_id, session_id=session_id, **body.model_dump()
+        )
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, FileSearchSessionPage):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "file_search_session_started",
+            agent_id=agent_id,
+            session_id=session_id,
+            root=body.root,
+            mode=body.mode,
+            returned_count=reply.returned_count,
+            remaining=reply.remaining,
+            truncated=reply.truncated,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent search session start timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/files/search/sessions/{session_id}/more",
+    dependencies=[Depends(require_control_token)],
+)
+async def more_file_search_session(
+    agent_id: str,
+    session_id: str,
+    body: FileSearchSessionMoreBody,
+    settings: SettingsDep,
+) -> FileSearchSessionPage:
+    validate_command_session_id(session_id)
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "filesystem.search_session")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = FileSearchSessionMoreRequest(
+            request_id=request_id, session_id=session_id, limit=body.limit
+        )
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, FileSearchSessionPage):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent search session read timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/files/search/sessions/{session_id}/stop",
+    dependencies=[Depends(require_control_token)],
+)
+async def stop_file_search_session(
+    agent_id: str, session_id: str, settings: SettingsDep
+) -> FileSearchSessionStopResult:
+    validate_command_session_id(session_id)
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "filesystem.search_session")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = FileSearchSessionStopRequest(request_id=request_id, session_id=session_id)
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, FileSearchSessionStopResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "file_search_session_stopped",
+            agent_id=agent_id,
+            session_id=session_id,
+            stopped=reply.stopped,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent search session stop timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
 async def _mutate_agent_path(
     agent_id: str,
     operation: str,
@@ -1912,6 +2031,10 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
                 reply = FileEditResult.model_validate(payload)
             elif message_type == "file_search_result":
                 reply = FileSearchResult.model_validate(payload)
+            elif message_type == "file_search_session_page":
+                reply = FileSearchSessionPage.model_validate(payload)
+            elif message_type == "file_search_session_stop_result":
+                reply = FileSearchSessionStopResult.model_validate(payload)
             elif message_type == "path_mutation_result":
                 reply = PathMutationResult.model_validate(payload)
             elif message_type == "process_list_result":

@@ -23,6 +23,10 @@ from remote_mcp_commander.agent.one_shot import OneShotCommandDispatcher
 from remote_mcp_commander.agent.path_ops import mutate_path
 from remote_mcp_commander.agent.pty_ops import PtySessionManager
 from remote_mcp_commander.agent.search_ops import search_files
+from remote_mcp_commander.agent.search_session_ops import (
+    FileSearchSessionManager,
+    FileSearchStartDispatcher,
+)
 from remote_mcp_commander.agent.session_ops import CommandSessionManager
 from remote_mcp_commander.agent.system_ops import (
     list_processes,
@@ -48,6 +52,9 @@ from remote_mcp_commander.protocol import (
     FileReadRequest,
     FileRootListRequest,
     FileSearchRequest,
+    FileSearchSessionMoreRequest,
+    FileSearchSessionStartRequest,
+    FileSearchSessionStopRequest,
     FileWriteRequest,
     GitStatusRequest,
     Heartbeat,
@@ -125,6 +132,8 @@ async def agent_loop() -> None:
                     child_env=settings.command_environment,
                     roots=roots,
                 )
+                search_sessions = FileSearchSessionManager(roots=roots)
+                search_starts = FileSearchStartDispatcher(search_sessions)
                 hello = AgentHello(
                     agent_id=settings.agent_id,
                     hostname=socket.gethostname(),
@@ -387,6 +396,27 @@ async def agent_loop() -> None:
                             await websocket.send(result.model_dump_json())
                             continue
 
+                        if message_type == "file_search_session_start_request":
+                            request = FileSearchSessionStartRequest.model_validate(payload)
+                            await search_starts.submit(request, websocket.send)
+                            continue
+
+                        if message_type == "file_search_session_more_request":
+                            request = FileSearchSessionMoreRequest.model_validate(payload)
+                            result = await search_sessions.more(
+                                request.request_id, request.session_id, request.limit
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "file_search_session_stop_request":
+                            request = FileSearchSessionStopRequest.model_validate(payload)
+                            result = await search_sessions.stop(
+                                request.request_id, request.session_id
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
                         if message_type == "path_mutation_request":
                             request = PathMutationRequest.model_validate(payload)
                             result = await mutate_path(
@@ -446,6 +476,7 @@ async def agent_loop() -> None:
                         sessions.cancel_all(),
                         pty_sessions.cancel_all(),
                         one_shot.cancel_all(),
+                        search_starts.cancel_all(),
                     )
                     await asyncio.gather(heartbeat_task, return_exceptions=True)
         except (OSError, websockets.ConnectionClosed):
