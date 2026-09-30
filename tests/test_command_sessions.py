@@ -238,3 +238,28 @@ async def test_hardened_command_session_rejects_env_override(tmp_path: Path) -> 
     )
     assert result.rejected is True
     assert "Personal mode" in (result.error or "")
+
+
+@pytest.mark.asyncio
+async def test_command_session_listing_filters_running_and_completed(tmp_path: Path) -> None:
+    make_fake_uptime(tmp_path, "print('done')\n")
+    manager = make_manager(exec_search_path=str(tmp_path))
+    completed_id = "9" * 32
+    await manager.start("start-done", completed_id, ["uptime"])
+    await wait_terminal(manager, completed_id)
+
+    make_fake_uptime(tmp_path, "import time\ntime.sleep(30)\n")
+    running_id = "a" * 32
+    await manager.start("start-running", running_id, ["uptime"])
+
+    active = await manager.list_infos(include_completed=False)
+    assert [item.session_id for item in active] == [running_id]
+    assert active[0].kind == "command"
+    assert active[0].state == "running"
+
+    all_infos = await manager.list_infos(include_completed=True)
+    by_id = {item.session_id: item for item in all_infos}
+    assert set(by_id) == {completed_id, running_id}
+    assert by_id[completed_id].state == "completed"
+    assert by_id[completed_id].output_chars == len("done\n")
+    await manager.cancel_all()

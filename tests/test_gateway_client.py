@@ -722,3 +722,31 @@ async def test_command_clients_send_structured_env_overrides() -> None:
     assert len(requests) == 3
     for request in requests:
         assert b'"env":{"DEMO_FLAG":"structured-value"}' in request.content
+
+
+@pytest.mark.asyncio
+async def test_runtime_session_list_client_sends_filters() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "sessions",
+                "sessions": [],
+                "total_count": 0,
+                "truncated": False,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    result = await client.list_sessions(
+        "server-01", kind="pty", include_completed=True, limit=25
+    )
+    assert result.total_count == 0
+    assert seen[0].url.path.endswith("/sessions")
+    payload = seen[0].content.decode()
+    assert '"kind":"pty"' in payload
+    assert '"include_completed":true' in payload
+    assert '"limit":25' in payload

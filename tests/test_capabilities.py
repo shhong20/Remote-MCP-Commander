@@ -64,6 +64,7 @@ def test_capabilities_reflect_available_tools_and_allowed_roots(
         "git.status",
         "command.execute",
         "command.session",
+        "command.session_list",
     }
     assert result == sorted(expected)
 
@@ -105,7 +106,9 @@ def test_pty_capability_requires_dedicated_allowlist_and_posix(monkeypatch) -> N
     enabled = capabilities.detect_capabilities(make_settings(pty_allowed_executables="bash"), [])
 
     assert "command.pty" not in disabled
+    assert "command.session_list" not in disabled
     assert "command.pty" in enabled
+    assert "command.session_list" in enabled
 
 
 def test_agent_hello_remains_backward_compatible_without_capabilities() -> None:

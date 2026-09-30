@@ -21,6 +21,7 @@ from remote_mcp_commander.protocol import (
     PtySessionOutput,
     PtySessionResizeResult,
     PtySessionSnapshot,
+    RuntimeSessionInfo,
 )
 
 
@@ -326,6 +327,26 @@ class PtySessionManager:
             session.state = terminal_state
             session.error = terminal_error
             session.finished_at = datetime.now(UTC)
+
+    async def list_infos(self, *, include_completed: bool) -> list[RuntimeSessionInfo]:
+        sessions = list(self._sessions.values())
+        if not include_completed:
+            sessions = [session for session in sessions if session.state == "running"]
+        return [
+            RuntimeSessionInfo(
+                session_id=session.session_id,
+                kind="pty",
+                executable=session.executable,
+                state=session.state,
+                cwd=session.cwd,
+                started_at=session.started_at,
+                finished_at=session.finished_at,
+                returncode=session.returncode,
+                output_chars=len(session.output),
+                output_truncated=session.output_truncated,
+            )
+            for session in sessions
+        ]
 
     async def status(self, request_id: str, session_id: str) -> PtySessionSnapshot:
         session = self._sessions.get(session_id)
