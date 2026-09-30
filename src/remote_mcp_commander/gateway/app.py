@@ -87,6 +87,8 @@ from remote_mcp_commander.protocol import (
     FileSearchBody,
     FileSearchRequest,
     FileSearchResult,
+    FileSearchSessionListRequest,
+    FileSearchSessionListResult,
     FileSearchSessionMoreBody,
     FileSearchSessionMoreRequest,
     FileSearchSessionPage,
@@ -169,6 +171,7 @@ AgentReply = (
     | FileEditResult
     | FileSearchResult
     | FileSearchSessionPage
+    | FileSearchSessionListResult
     | FileSearchSessionStopResult
     | PathMutationResult
     | ProcessListResult
@@ -1568,6 +1571,34 @@ async def start_file_search_session(
         connection.pending.pop(request_id, None)
 
 
+@app.get(
+    "/api/v1/agents/{agent_id}/files/search/sessions",
+    dependencies=[Depends(require_control_token)],
+)
+async def list_file_search_sessions(
+    agent_id: str, settings: SettingsDep
+) -> FileSearchSessionListResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "filesystem.search_session")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = FileSearchSessionListRequest(request_id=request_id)
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, FileSearchSessionListResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent search session list timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
 @app.post(
     "/api/v1/agents/{agent_id}/files/search/sessions/{session_id}/more",
     dependencies=[Depends(require_control_token)],
@@ -1587,7 +1618,10 @@ async def more_file_search_session(
     future = pending_request(connection, request_id)
     try:
         request = FileSearchSessionMoreRequest(
-            request_id=request_id, session_id=session_id, limit=body.limit
+            request_id=request_id,
+            session_id=session_id,
+            offset=body.offset,
+            limit=body.limit,
         )
         await connection.websocket.send_text(request.model_dump_json())
         reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
@@ -2245,6 +2279,8 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
                 reply = FileSearchResult.model_validate(payload)
             elif message_type == "file_search_session_page":
                 reply = FileSearchSessionPage.model_validate(payload)
+            elif message_type == "file_search_session_list_result":
+                reply = FileSearchSessionListResult.model_validate(payload)
             elif message_type == "file_search_session_stop_result":
                 reply = FileSearchSessionStopResult.model_validate(payload)
             elif message_type == "path_mutation_result":

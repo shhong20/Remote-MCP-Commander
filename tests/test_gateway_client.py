@@ -557,6 +557,8 @@ async def test_stateful_search_client_uses_session_routes() -> None:
 
     def handler(request: httpx.Request) -> httpx.Response:
         requests.append(request)
+        if request.method == "GET" and request.url.path.endswith("/files/search/sessions"):
+            return httpx.Response(200, json={"request_id": "list", "sessions": []})
         if request.url.path.endswith("/stop"):
             return httpx.Response(
                 200,
@@ -587,15 +589,19 @@ async def test_stateful_search_client_uses_session_routes() -> None:
         page_size=25,
         max_results=500,
     )
-    await client.more_search_session("server-01", session_id, limit=30)
+    await client.list_search_sessions("server-01")
+    await client.more_search_session("server-01", session_id, offset=-20, limit=30)
     await client.stop_search_session("server-01", session_id)
 
     assert requests[0].url.path.endswith("/files/search/sessions")
     assert b'"page_size":25' in requests[0].content
     assert b'"max_results":500' in requests[0].content
-    assert requests[1].url.path.endswith(f"/{session_id}/more")
-    assert b'"limit":30' in requests[1].content
-    assert requests[2].url.path.endswith(f"/{session_id}/stop")
+    assert requests[1].method == "GET"
+    assert requests[1].url.path.endswith("/files/search/sessions")
+    assert requests[2].url.path.endswith(f"/{session_id}/more")
+    assert b'"offset":-20' in requests[2].content
+    assert b'"limit":30' in requests[2].content
+    assert requests[3].url.path.endswith(f"/{session_id}/stop")
 
 
 @pytest.mark.asyncio

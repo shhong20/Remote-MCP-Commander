@@ -40,6 +40,7 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "edit_file",
         "search_files",
         "start_search",
+        "list_searches",
         "get_more_search_results",
         "stop_search",
         "inspect_tree",
@@ -250,8 +251,11 @@ async def test_stateful_search_tools_use_bounded_schema() -> None:
     assert start["properties"]["include_hidden"]["default"] is False
     assert start["properties"]["page_size"]["default"] == 50
     assert start["properties"]["max_results"]["default"] == 1000
+    listing = tools["list_searches"].input_schema
+    assert set(listing["required"]) == {"agent_id"}
     more = tools["get_more_search_results"].input_schema
     assert set(more["required"]) == {"agent_id", "session_id"}
+    assert more["properties"]["offset"]["default"] is None
     assert more["properties"]["limit"]["default"] == 50
     stop = tools["stop_search"].input_schema
     assert set(stop["required"]) == {"agent_id", "session_id"}

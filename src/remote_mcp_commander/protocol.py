@@ -367,7 +367,13 @@ class FileSearchSessionMoreRequest(BaseModel):
     type: Literal["file_search_session_more_request"] = "file_search_session_more_request"
     request_id: str
     session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    offset: int | None = Field(default=None, ge=-2000, le=1999)
     limit: int = Field(default=50, ge=1, le=200)
+
+
+class FileSearchSessionListRequest(BaseModel):
+    type: Literal["file_search_session_list_request"] = "file_search_session_list_request"
+    request_id: str
 
 
 class FileSearchSessionStopRequest(BaseModel):
@@ -383,11 +389,34 @@ class FileSearchSessionPage(BaseModel):
     matches: list[FileSearchMatch] = Field(default_factory=list)
     scanned_files: int = 0
     returned_count: int = 0
+    total_matches: int = 0
+    offset: int = 0
+    next_offset: int = 0
     remaining: int = 0
     exhausted: bool = False
     truncated: bool = False
     rejected: bool = False
     error: str | None = None
+
+
+class FileSearchSessionInfo(BaseModel):
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    root: str
+    query: str
+    mode: FileSearchMode
+    file_glob: str | None = None
+    case_sensitive: bool = False
+    include_hidden: bool = False
+    scanned_files: int = 0
+    total_matches: int = 0
+    cursor: int = 0
+    truncated: bool = False
+
+
+class FileSearchSessionListResult(BaseModel):
+    type: Literal["file_search_session_list_result"] = "file_search_session_list_result"
+    request_id: str
+    sessions: list[FileSearchSessionInfo] = Field(default_factory=list)
 
 
 class FileSearchSessionStopResult(BaseModel):
@@ -411,6 +440,7 @@ class FileSearchSessionStartBody(BaseModel):
 
 
 class FileSearchSessionMoreBody(BaseModel):
+    offset: int | None = Field(default=None, ge=-2000, le=1999)
     limit: int = Field(default=50, ge=1, le=200)
 
 

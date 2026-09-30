@@ -25,6 +25,7 @@ from remote_mcp_commander.protocol import (
     FileReadResult,
     FileRootListResult,
     FileSearchResult,
+    FileSearchSessionListResult,
     FileSearchSessionPage,
     FileSearchSessionStopResult,
     FileWriteResult,
@@ -356,11 +357,21 @@ def build_mcp(settings: Settings) -> MCPServer:
         )
 
     @server.tool()
+    async def list_searches(agent_id: str) -> FileSearchSessionListResult:
+        """List retained stateful search sessions and their cursors."""
+        return await GatewayClient(settings).list_search_sessions(agent_id)
+
+    @server.tool()
     async def get_more_search_results(
-        agent_id: str, session_id: str, limit: int = 50
+        agent_id: str,
+        session_id: str,
+        offset: int | None = None,
+        limit: int = 50,
     ) -> FileSearchSessionPage:
-        """Read the next bounded page from a stateful search session."""
-        return await GatewayClient(settings).more_search_session(agent_id, session_id, limit=limit)
+        """Read the next page or an explicit positive/negative offset range."""
+        return await GatewayClient(settings).more_search_session(
+            agent_id, session_id, offset=offset, limit=limit
+        )
 
     @server.tool()
     async def stop_search(agent_id: str, session_id: str) -> FileSearchSessionStopResult:
