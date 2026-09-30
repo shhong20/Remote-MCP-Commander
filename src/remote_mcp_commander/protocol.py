@@ -442,6 +442,63 @@ class PathMutationBody(BaseModel):
     overwrite: bool = False
 
 
+class TreeInspectRequest(BaseModel):
+    type: Literal["tree_inspect_request"] = "tree_inspect_request"
+    request_id: str
+    path: str = Field(min_length=1, max_length=4096)
+    max_entries: int = Field(default=5000, ge=1, le=50_000)
+    max_total_bytes: int = Field(default=268_435_456, ge=1, le=1_073_741_824)
+
+
+class TreeInspectResult(BaseModel):
+    type: Literal["tree_inspect_result"] = "tree_inspect_result"
+    request_id: str
+    path: str = ""
+    entries: int = 0
+    total_bytes: int = 0
+    tree_sha256: str | None = None
+    rejected: bool = False
+    error: str | None = None
+
+
+class TreeInspectBody(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+    max_entries: int = Field(default=5000, ge=1, le=50_000)
+    max_total_bytes: int = Field(default=268_435_456, ge=1, le=1_073_741_824)
+
+
+class TreeMutationRequest(BaseModel):
+    type: Literal["tree_mutation_request"] = "tree_mutation_request"
+    request_id: str
+    operation: Literal["copy_tree", "delete_tree"]
+    path: str = Field(min_length=1, max_length=4096)
+    destination: str | None = Field(default=None, max_length=4096)
+    expected_tree_sha256: str = Field(min_length=64, max_length=64)
+    max_entries: int = Field(default=5000, ge=1, le=50_000)
+    max_total_bytes: int = Field(default=268_435_456, ge=1, le=1_073_741_824)
+
+
+class TreeMutationResult(BaseModel):
+    type: Literal["tree_mutation_result"] = "tree_mutation_result"
+    request_id: str
+    operation: Literal["copy_tree", "delete_tree"]
+    path: str = ""
+    destination: str | None = None
+    entries: int = 0
+    total_bytes: int = 0
+    changed: bool = False
+    rejected: bool = False
+    error: str | None = None
+
+
+class TreeMutationBody(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+    destination: str | None = Field(default=None, max_length=4096)
+    expected_tree_sha256: str = Field(min_length=64, max_length=64)
+    max_entries: int = Field(default=5000, ge=1, le=50_000)
+    max_total_bytes: int = Field(default=268_435_456, ge=1, le=1_073_741_824)
+
+
 class ProcessInfo(BaseModel):
     pid: int
     create_time_ms: int

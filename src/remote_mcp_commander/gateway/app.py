@@ -146,6 +146,12 @@ from remote_mcp_commander.protocol import (
     ServiceStatusResult,
     SystemHealthRequest,
     SystemHealthResult,
+    TreeInspectBody,
+    TreeInspectRequest,
+    TreeInspectResult,
+    TreeMutationBody,
+    TreeMutationRequest,
+    TreeMutationResult,
 )
 
 AgentReply = (
@@ -175,6 +181,8 @@ AgentReply = (
     | PtySessionResizeResult
     | PtySessionDiscardResult
     | SystemHealthResult
+    | TreeInspectResult
+    | TreeMutationResult
     | PortLookupResult
     | ServiceLogsResult
     | GitStatusResult
@@ -1710,6 +1718,113 @@ async def delete_agent_path(
 
 
 @app.post(
+    "/api/v1/agents/{agent_id}/files/tree/inspect",
+    dependencies=[Depends(require_control_token)],
+)
+async def inspect_agent_tree(
+    agent_id: str, body: TreeInspectBody, settings: SettingsDep
+) -> TreeInspectResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "filesystem.tree")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = TreeInspectRequest(request_id=request_id, **body.model_dump())
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, TreeInspectResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "tree_inspected",
+            agent_id=agent_id,
+            path=body.path,
+            entries=reply.entries,
+            total_bytes=reply.total_bytes,
+            rejected=reply.rejected,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent tree inspection timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+async def _mutate_agent_tree(
+    agent_id: str,
+    operation: str,
+    body: TreeMutationBody,
+    settings: Settings,
+) -> TreeMutationResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "filesystem.tree_mutate")
+    audit_required(
+        "tree_mutation_requested",
+        agent_id=agent_id,
+        operation=operation,
+        path=body.path,
+        destination=body.destination,
+        max_entries=body.max_entries,
+        max_total_bytes=body.max_total_bytes,
+    )
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = TreeMutationRequest(
+            request_id=request_id,
+            operation=operation,
+            **body.model_dump(),
+        )
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, TreeMutationResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "tree_mutation",
+            agent_id=agent_id,
+            operation=operation,
+            path=body.path,
+            destination=body.destination,
+            entries=reply.entries,
+            total_bytes=reply.total_bytes,
+            changed=reply.changed,
+            rejected=reply.rejected,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent tree mutation timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/files/tree/copy",
+    dependencies=[Depends(require_control_token)],
+)
+async def copy_agent_tree(
+    agent_id: str, body: TreeMutationBody, settings: SettingsDep
+) -> TreeMutationResult:
+    return await _mutate_agent_tree(agent_id, "copy_tree", body, settings)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/files/tree/delete",
+    dependencies=[Depends(require_control_token)],
+)
+async def delete_agent_tree(
+    agent_id: str, body: TreeMutationBody, settings: SettingsDep
+) -> TreeMutationResult:
+    return await _mutate_agent_tree(agent_id, "delete_tree", body, settings)
+
+
+@app.post(
     "/api/v1/agents/{agent_id}/processes",
     dependencies=[Depends(require_control_token)],
 )
@@ -2053,6 +2168,10 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
                 reply = ServiceLogsResult.model_validate(payload)
             elif message_type == "git_status_result":
                 reply = GitStatusResult.model_validate(payload)
+            elif message_type == "tree_inspect_result":
+                reply = TreeInspectResult.model_validate(payload)
+            elif message_type == "tree_mutation_result":
+                reply = TreeMutationResult.model_validate(payload)
             else:
                 continue
 

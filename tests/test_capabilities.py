@@ -55,6 +55,7 @@ def test_capabilities_reflect_available_tools_and_allowed_roots(
         "filesystem.discovery",
         "filesystem.search",
         "filesystem.search_session",
+        "filesystem.tree",
         "file.read",
         "file.read_many",
         "file.write",
@@ -72,6 +73,7 @@ def test_personal_mode_advertises_filesystem_mutation(tmp_path: Path) -> None:
         make_settings(operation_mode="personal"), [tmp_path.resolve()]
     )
     assert "filesystem.mutate" in result
+    assert "filesystem.tree_mutate" in result
 
 
 def test_git_capability_requires_allowed_root(monkeypatch) -> None:

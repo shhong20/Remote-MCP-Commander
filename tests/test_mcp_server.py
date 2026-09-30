@@ -42,6 +42,9 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "start_search",
         "get_more_search_results",
         "stop_search",
+        "inspect_tree",
+        "copy_directory",
+        "delete_tree",
         "create_directory",
         "copy_file",
         "move_path",
@@ -242,3 +245,18 @@ async def test_stateful_search_tools_use_bounded_schema() -> None:
     assert more["properties"]["limit"]["default"] == 50
     stop = tools["stop_search"].input_schema
     assert set(stop["required"]) == {"agent_id", "session_id"}
+
+
+@pytest.mark.asyncio
+async def test_recursive_tree_tools_require_inspection_fingerprint() -> None:
+    server = build_mcp(make_settings())
+    async with Client(server) as client:
+        result = await client.list_tools()
+
+    tools = {tool.name: tool for tool in result.tools}
+    inspect = tools["inspect_tree"].input_schema
+    assert set(inspect["required"]) == {"agent_id", "path"}
+    copy = tools["copy_directory"].input_schema
+    assert {"agent_id", "source", "destination", "expected_tree_sha256"} == set(copy["required"])
+    delete = tools["delete_tree"].input_schema
+    assert {"agent_id", "path", "expected_tree_sha256"} == set(delete["required"])

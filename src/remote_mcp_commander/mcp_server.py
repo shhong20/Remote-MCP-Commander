@@ -44,6 +44,8 @@ from remote_mcp_commander.protocol import (
     ServiceLogsResult,
     ServiceStatusResult,
     SystemHealthResult,
+    TreeInspectResult,
+    TreeMutationResult,
 )
 
 
@@ -362,6 +364,59 @@ def build_mcp(settings: Settings) -> MCPServer:
     async def stop_search(agent_id: str, session_id: str) -> FileSearchSessionStopResult:
         """Stop and discard a stateful search session."""
         return await GatewayClient(settings).stop_search_session(agent_id, session_id)
+
+    @server.tool()
+    async def inspect_tree(
+        agent_id: str,
+        path: str,
+        max_entries: int = 5000,
+        max_total_bytes: int = 268_435_456,
+    ) -> TreeInspectResult:
+        """Fingerprint a bounded directory tree before recursive copy/delete."""
+        return await GatewayClient(settings).inspect_tree(
+            agent_id,
+            path,
+            max_entries=max_entries,
+            max_total_bytes=max_total_bytes,
+        )
+
+    @server.tool()
+    async def copy_directory(
+        agent_id: str,
+        source: str,
+        destination: str,
+        expected_tree_sha256: str,
+        max_entries: int = 5000,
+        max_total_bytes: int = 268_435_456,
+    ) -> TreeMutationResult:
+        """Copy one inspected directory tree inside allowed roots."""
+        return await GatewayClient(settings).mutate_tree(
+            agent_id,
+            "copy_tree",
+            source,
+            expected_tree_sha256,
+            destination=destination,
+            max_entries=max_entries,
+            max_total_bytes=max_total_bytes,
+        )
+
+    @server.tool()
+    async def delete_tree(
+        agent_id: str,
+        path: str,
+        expected_tree_sha256: str,
+        max_entries: int = 5000,
+        max_total_bytes: int = 268_435_456,
+    ) -> TreeMutationResult:
+        """Recursively delete one inspected directory tree inside allowed roots."""
+        return await GatewayClient(settings).mutate_tree(
+            agent_id,
+            "delete_tree",
+            path,
+            expected_tree_sha256,
+            max_entries=max_entries,
+            max_total_bytes=max_total_bytes,
+        )
 
     @server.tool()
     async def create_directory(

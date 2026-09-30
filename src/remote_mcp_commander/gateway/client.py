@@ -37,6 +37,8 @@ from remote_mcp_commander.protocol import (
     ServiceLogsResult,
     ServiceStatusResult,
     SystemHealthResult,
+    TreeInspectResult,
+    TreeMutationResult,
 )
 
 
@@ -457,6 +459,50 @@ class GatewayClient:
             f"/api/v1/agents/{agent_id}/files/search/sessions/{session_id}/stop",
         )
         return FileSearchSessionStopResult.model_validate(payload)
+
+    async def inspect_tree(
+        self,
+        agent_id: str,
+        path: str,
+        *,
+        max_entries: int = 5000,
+        max_total_bytes: int = 268_435_456,
+    ) -> TreeInspectResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/files/tree/inspect",
+            json_body={
+                "path": path,
+                "max_entries": max_entries,
+                "max_total_bytes": max_total_bytes,
+            },
+        )
+        return TreeInspectResult.model_validate(payload)
+
+    async def mutate_tree(
+        self,
+        agent_id: str,
+        operation: str,
+        path: str,
+        expected_tree_sha256: str,
+        *,
+        destination: str | None = None,
+        max_entries: int = 5000,
+        max_total_bytes: int = 268_435_456,
+    ) -> TreeMutationResult:
+        action = "copy" if operation == "copy_tree" else "delete"
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/files/tree/{action}",
+            json_body={
+                "path": path,
+                "destination": destination,
+                "expected_tree_sha256": expected_tree_sha256,
+                "max_entries": max_entries,
+                "max_total_bytes": max_total_bytes,
+            },
+        )
+        return TreeMutationResult.model_validate(payload)
 
     async def mutate_path(
         self,
