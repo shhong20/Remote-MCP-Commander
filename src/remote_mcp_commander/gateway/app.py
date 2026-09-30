@@ -65,6 +65,9 @@ from remote_mcp_commander.protocol import (
     DirectoryListBody,
     DirectoryListRequest,
     DirectoryListResult,
+    DirectoryTreeBody,
+    DirectoryTreeRequest,
+    DirectoryTreeResult,
     EnrollmentClaimBody,
     EnrollmentClaimResult,
     EnrollmentCreateBody,
@@ -169,6 +172,7 @@ AgentReply = (
     | FileReadManyResult
     | FileRootListResult
     | DirectoryListResult
+    | DirectoryTreeResult
     | FileInfoResult
     | FileWriteResult
     | FileEditResult
@@ -1381,6 +1385,38 @@ async def list_agent_directory(
 
 
 @app.post(
+    "/api/v1/agents/{agent_id}/files/tree-list",
+    dependencies=[Depends(require_control_token)],
+)
+async def list_agent_directory_tree(
+    agent_id: str, body: DirectoryTreeBody, settings: SettingsDep
+) -> DirectoryTreeResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "filesystem.tree_list")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = DirectoryTreeRequest(request_id=request_id, **body.model_dump())
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, DirectoryTreeResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "directory_tree_list", agent_id=agent_id, path=body.path,
+            depth=body.depth, count=len(reply.entries), truncated=reply.truncated,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent directory tree list timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
     "/api/v1/agents/{agent_id}/files/info",
     dependencies=[Depends(require_control_token)],
 )
@@ -2321,6 +2357,8 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
                 reply = FileRootListResult.model_validate(payload)
             elif message_type == "directory_list_result":
                 reply = DirectoryListResult.model_validate(payload)
+            elif message_type == "directory_tree_result":
+                reply = DirectoryTreeResult.model_validate(payload)
             elif message_type == "file_info_result":
                 reply = FileInfoResult.model_validate(payload)
             elif message_type == "file_read_result":

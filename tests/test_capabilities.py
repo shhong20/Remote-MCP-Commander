@@ -53,6 +53,7 @@ def test_capabilities_reflect_available_tools_and_allowed_roots(
         "service.action",
         "service.logs",
         "filesystem.discovery",
+        "filesystem.tree_list",
         "filesystem.search",
         "filesystem.search_session",
         "filesystem.tree",

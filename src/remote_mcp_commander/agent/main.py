@@ -17,7 +17,12 @@ from remote_mcp_commander.agent.file_ops import (
     read_text_file,
     write_text_file,
 )
-from remote_mcp_commander.agent.filesystem_ops import file_info, list_directory, list_file_roots
+from remote_mcp_commander.agent.filesystem_ops import (
+    file_info,
+    list_directory,
+    list_directory_tree,
+    list_file_roots,
+)
 from remote_mcp_commander.agent.git_ops import git_status
 from remote_mcp_commander.agent.one_shot import OneShotCommandDispatcher
 from remote_mcp_commander.agent.path_ops import mutate_path
@@ -48,6 +53,7 @@ from remote_mcp_commander.protocol import (
     CommandSessionStartRequest,
     CommandSessionStatusRequest,
     DirectoryListRequest,
+    DirectoryTreeRequest,
     FileEditRequest,
     FileInfoRequest,
     FileReadManyRequest,
@@ -355,6 +361,20 @@ async def agent_loop() -> None:
                                 request.path,
                                 roots=roots,
                                 limit=request.limit,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "directory_tree_request":
+                            request = DirectoryTreeRequest.model_validate(payload)
+                            result = await list_directory_tree(
+                                request.request_id,
+                                request.path,
+                                roots=roots,
+                                depth=request.depth,
+                                include_hidden=request.include_hidden,
+                                per_directory_limit=request.per_directory_limit,
+                                max_entries=request.max_entries,
                             )
                             await websocket.send(result.model_dump_json())
                             continue

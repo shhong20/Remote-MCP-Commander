@@ -38,6 +38,7 @@ def detect_capabilities(settings: Settings, roots: list[Path]) -> list[str]:
         capabilities.update(
             {
                 "filesystem.discovery",
+                "filesystem.tree_list",
                 "filesystem.search",
                 "filesystem.search_session",
                 "filesystem.tree",

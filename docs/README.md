@@ -23,3 +23,4 @@
 - [Personal filesystem tools](personal-filesystem-tools.md)
 - [Per-command environment overrides](command-environment.md)
 - [Runtime session listing](session-listing.md)
+- [Recursive directory listing](recursive-directory-listing.md)
