@@ -15,6 +15,7 @@ from remote_mcp_commander.protocol import (
     DirectoryListResult,
     FileEditResult,
     FileInfoResult,
+    FileReadManyResult,
     FileReadResult,
     FileRootListResult,
     FileSearchResult,
@@ -320,6 +321,25 @@ class GatewayClient:
             json_body={"path": path, "offset": offset, "max_bytes": max_bytes},
         )
         return FileReadResult.model_validate(payload)
+
+    async def read_many_files(
+        self,
+        agent_id: str,
+        paths: list[str],
+        *,
+        max_bytes_per_file: int = 32_768,
+        max_total_bytes: int = 262_144,
+    ) -> FileReadManyResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/files/read-many",
+            json_body={
+                "paths": paths,
+                "max_bytes_per_file": max_bytes_per_file,
+                "max_total_bytes": max_total_bytes,
+            },
+        )
+        return FileReadManyResult.model_validate(payload)
 
     async def write_file(
         self,

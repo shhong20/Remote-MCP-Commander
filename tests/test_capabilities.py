@@ -55,6 +55,7 @@ def test_capabilities_reflect_available_tools_and_allowed_roots(
         "filesystem.discovery",
         "filesystem.search",
         "file.read",
+        "file.read_many",
         "file.write",
         "file.edit",
         "command.cwd",

@@ -77,6 +77,9 @@ from remote_mcp_commander.protocol import (
     FileInfoRequest,
     FileInfoResult,
     FileReadBody,
+    FileReadManyBody,
+    FileReadManyRequest,
+    FileReadManyResult,
     FileReadRequest,
     FileReadResult,
     FileRootListRequest,
@@ -142,6 +145,7 @@ AgentReply = (
     CommandResult
     | PingResult
     | FileReadResult
+    | FileReadManyResult
     | FileRootListResult
     | DirectoryListResult
     | FileInfoResult
@@ -1330,6 +1334,42 @@ async def read_file(agent_id: str, body: FileReadBody, settings: SettingsDep) ->
 
 
 @app.post(
+    "/api/v1/agents/{agent_id}/files/read-many",
+    dependencies=[Depends(require_control_token)],
+)
+async def read_many_files(
+    agent_id: str, body: FileReadManyBody, settings: SettingsDep
+) -> FileReadManyResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "file.read_many")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = FileReadManyRequest(request_id=request_id, **body.model_dump())
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, FileReadManyResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "file_read_many",
+            agent_id=agent_id,
+            requested_count=reply.requested_count,
+            returned_count=len(reply.files),
+            total_bytes=reply.total_bytes,
+            truncated=reply.truncated,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent multi-file read timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
     "/api/v1/agents/{agent_id}/files/write",
     dependencies=[Depends(require_control_token)],
 )
@@ -1845,6 +1885,8 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
                 reply = FileInfoResult.model_validate(payload)
             elif message_type == "file_read_result":
                 reply = FileReadResult.model_validate(payload)
+            elif message_type == "file_read_many_result":
+                reply = FileReadManyResult.model_validate(payload)
             elif message_type == "file_write_result":
                 reply = FileWriteResult.model_validate(payload)
             elif message_type == "file_edit_result":
