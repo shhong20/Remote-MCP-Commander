@@ -137,6 +137,14 @@ def test_pty_approval_target_binds_full_argv() -> None:
         validate_approval_target("pty.start", "bash")
 
 
+
+
+def test_pty_approval_target_binds_environment() -> None:
+    base = pty_approval_target(["bash"], "/srv/app", {"DEMO": "one"})
+    changed = pty_approval_target(["bash"], "/srv/app", {"DEMO": "two"})
+    assert base != changed
+    assert pty_approval_target(["bash"]) == pty_approval_target(["bash"], None, None)
+
 def test_pty_policy_rejects_absolute_executable() -> None:
     settings = make_settings(pty_agent_policies_json='{"server-01":["bash"]}')
     with pytest.raises(HTTPException) as exc_info:
@@ -167,6 +175,18 @@ def test_command_protocol_rejects_oversized_argument() -> None:
     with pytest.raises(ValidationError):
         ExecuteBody(argv=["echo", "x" * 4097])
 
+
+
+
+def test_command_protocol_rejects_invalid_or_oversized_environment() -> None:
+    from pydantic import ValidationError
+
+    from remote_mcp_commander.protocol import ExecuteBody
+
+    with pytest.raises(ValidationError):
+        ExecuteBody(argv=["echo", "ok"], env={"BAD-NAME": "1"})
+    with pytest.raises(ValidationError):
+        ExecuteBody(argv=["echo", "ok"], env={f"VAR_{i}": "1" for i in range(33)})
 
 def test_personal_gateway_policy_allows_broad_developer_commands() -> None:
     settings = make_settings(operation_mode="personal")

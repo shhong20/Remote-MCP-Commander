@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from remote_mcp_commander.agent.env_policy import merge_command_env
 from remote_mcp_commander.agent.file_ops import resolve_allowed_directory
 from remote_mcp_commander.policy import TRUSTED_GENERIC_EXEC_PATH, validate_pty_argv
 from remote_mcp_commander.protocol import (
@@ -81,6 +82,7 @@ class PtySessionManager:
         history_limit: int = 100,
         exec_search_path: str = TRUSTED_GENERIC_EXEC_PATH,
         child_env: dict[str, str] | None = None,
+        personal_mode: bool = False,
         roots: list[Path] | None = None,
     ) -> None:
         self.allowlist = allowlist
@@ -91,6 +93,7 @@ class PtySessionManager:
         self.history_limit = history_limit
         self.exec_search_path = exec_search_path
         self.child_env = child_env or {"PATH": exec_search_path}
+        self.personal_mode = personal_mode
         self.roots = roots or []
         self._sessions: dict[str, _PtySession] = {}
         self._lock = asyncio.Lock()
@@ -139,6 +142,7 @@ class PtySessionManager:
         argv: list[str],
         *,
         cwd: str | None = None,
+        env_overrides: dict[str, str] | None = None,
         columns: int,
         rows: int,
     ) -> PtySessionSnapshot:
@@ -163,6 +167,11 @@ class PtySessionManager:
             )
         try:
             resolved_cwd = resolve_allowed_directory(cwd, self.roots) if cwd is not None else None
+            process_env = merge_command_env(
+                self.child_env,
+                env_overrides or {},
+                personal_mode=self.personal_mode,
+            )
         except (OSError, PermissionError, ValueError) as exc:
             return self._error_snapshot(request_id, session_id, str(exc))
 
@@ -188,10 +197,10 @@ class PtySessionManager:
                     stderr=slave_fd,
                     cwd=resolved_cwd,
                     env={
-                        **self.child_env,
-                        "TERM": self.child_env.get("TERM", "xterm-256color"),
-                        "LANG": self.child_env.get("LANG", "C.UTF-8"),
-                        "LC_ALL": self.child_env.get("LC_ALL", "C.UTF-8"),
+                        **process_env,
+                        "TERM": process_env.get("TERM", "xterm-256color"),
+                        "LANG": process_env.get("LANG", "C.UTF-8"),
+                        "LC_ALL": process_env.get("LC_ALL", "C.UTF-8"),
                     },
                     preexec_fn=lambda: _prepare_pty_child(slave_fd),
                 )

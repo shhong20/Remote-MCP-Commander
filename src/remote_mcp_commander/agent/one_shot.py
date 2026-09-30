@@ -72,6 +72,7 @@ class OneShotCommandDispatcher:
             exec_search_path=self.exec_search_path,
             policy_mode=self.policy_mode,
             child_env=self.child_env,
+            env_overrides=request.env,
             cwd=request.cwd,
             roots=self.roots,
         )

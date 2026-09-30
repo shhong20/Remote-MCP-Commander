@@ -132,16 +132,26 @@ def build_mcp(settings: Settings) -> MCPServer:
         return await GatewayClient(settings).git_status(agent_id, path)
 
     @server.tool()
-    async def execute(agent_id: str, argv: list[str], cwd: str | None = None) -> CommandResult:
-        """Execute argv, optionally in an allowed-root working directory."""
-        return await GatewayClient(settings).execute(agent_id, argv, cwd=cwd)
+    async def execute(
+        agent_id: str,
+        argv: list[str],
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
+    ) -> CommandResult:
+        """Execute argv with optional allowed-root cwd and Personal-mode env overrides."""
+        return await GatewayClient(settings).execute(agent_id, argv, cwd=cwd, env=env)
 
     @server.tool()
     async def start_command(
-        agent_id: str, argv: list[str], cwd: str | None = None
+        agent_id: str,
+        argv: list[str],
+        cwd: str | None = None,
+        env: dict[str, str] | None = None,
     ) -> CommandSessionSnapshot:
-        """Start a command session, optionally in an allowed-root working directory."""
-        return await GatewayClient(settings).start_command_session(agent_id, argv, cwd=cwd)
+        """Start a command session with optional cwd and Personal-mode env overrides."""
+        return await GatewayClient(settings).start_command_session(
+            agent_id, argv, cwd=cwd, env=env
+        )
 
     @server.tool()
     async def command_status(agent_id: str, session_id: str) -> CommandSessionSnapshot:
@@ -182,6 +192,7 @@ def build_mcp(settings: Settings) -> MCPServer:
         approval_id: str | None = None,
         approval_secret: str | None = None,
         cwd: str | None = None,
+        env: dict[str, str] | None = None,
         columns: int = 80,
         rows: int = 24,
     ) -> PtySessionSnapshot:
@@ -192,6 +203,7 @@ def build_mcp(settings: Settings) -> MCPServer:
             approval_id,
             approval_secret,
             cwd=cwd,
+            env=env,
             columns=columns,
             rows=rows,
         )

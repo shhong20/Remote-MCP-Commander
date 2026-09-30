@@ -140,3 +140,44 @@ async def test_pty_session_can_be_cancelled_and_discarded(tmp_path: Path) -> Non
     assert cancelled.state == "cancelled"
     discarded = await manager.discard("discard", session_id)
     assert discarded.discarded is True
+
+
+@pytest.mark.asyncio
+async def test_personal_pty_receives_env_override(tmp_path: Path) -> None:
+    make_fake_terminal(
+        tmp_path,
+        "import os\nprint(os.environ.get('DEMO_FLAG', 'missing'), flush=True)\n",
+    )
+    manager = make_manager(
+        exec_search_path=str(tmp_path),
+        personal_mode=True,
+        child_env={"PATH": str(tmp_path)},
+    )
+    session_id = "1" * 32
+    started = await manager.start(
+        "start",
+        session_id,
+        ["terminal"],
+        env_overrides={"DEMO_FLAG": "pty-value"},
+        columns=80,
+        rows=24,
+    )
+    assert started.rejected is False
+    result = await wait_terminal(manager, session_id)
+    assert "pty-value" in result.output
+
+
+@pytest.mark.asyncio
+async def test_hardened_pty_rejects_env_override(tmp_path: Path) -> None:
+    make_fake_terminal(tmp_path, "print('should-not-run')\n")
+    manager = make_manager(exec_search_path=str(tmp_path))
+    result = await manager.start(
+        "start",
+        "2" * 32,
+        ["terminal"],
+        env_overrides={"DEMO_FLAG": "blocked"},
+        columns=80,
+        rows=24,
+    )
+    assert result.rejected is True
+    assert "Personal mode" in (result.error or "")

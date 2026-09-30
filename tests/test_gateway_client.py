@@ -685,3 +685,40 @@ async def test_signal_process_client_sends_structured_signal_payload() -> None:
     assert '"pid":123' in payload
     assert '"expected_create_time_ms":456789' in payload
     assert '"signal":"kill"' in payload
+
+
+@pytest.mark.asyncio
+async def test_command_clients_send_structured_env_overrides() -> None:
+    requests: list[httpx.Request] = []
+    session_id = "9" * 32
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/execute"):
+            return httpx.Response(200, json={"request_id": "e", "returncode": 0})
+        if request.url.path.endswith("/commands/sessions"):
+            return httpx.Response(
+                200,
+                json={"request_id": "s", "session_id": session_id, "state": "running"},
+            )
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "p",
+                "session_id": session_id,
+                "executable": "bash",
+                "state": "running",
+                "columns": 80,
+                "rows": 24,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    env = {"DEMO_FLAG": "structured-value"}
+    await client.execute("server-01", ["echo", "ok"], env=env)
+    await client.start_command_session("server-01", ["echo", "ok"], env=env)
+    await client.start_pty_session("server-01", ["bash"], env=env)
+
+    assert len(requests) == 3
+    for request in requests:
+        assert b'"env":{"DEMO_FLAG":"structured-value"}' in request.content

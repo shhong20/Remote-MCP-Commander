@@ -74,6 +74,7 @@ def test_personal_mode_advertises_filesystem_mutation(tmp_path: Path) -> None:
     )
     assert "filesystem.mutate" in result
     assert "filesystem.tree_mutate" in result
+    assert "command.env" in result
 
 
 def test_git_capability_requires_allowed_root(monkeypatch) -> None:

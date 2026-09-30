@@ -224,6 +224,8 @@ async def test_command_tools_expose_optional_working_directory() -> None:
         schema = tools[name].input_schema
         assert "cwd" in schema["properties"]
         assert "cwd" not in schema["required"]
+        assert "env" in schema["properties"]
+        assert "env" not in schema["required"]
 
 
 @pytest.mark.asyncio
