@@ -56,6 +56,7 @@ def test_capabilities_reflect_available_tools_and_allowed_roots(
         "filesystem.search",
         "file.read",
         "file.write",
+        "file.edit",
         "git.status",
         "command.execute",
         "command.session",

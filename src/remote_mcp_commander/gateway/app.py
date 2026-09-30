@@ -70,6 +70,9 @@ from remote_mcp_commander.protocol import (
     EnrollmentCreateBody,
     EnrollmentTicket,
     ExecuteBody,
+    FileEditBody,
+    FileEditRequest,
+    FileEditResult,
     FileInfoBody,
     FileInfoRequest,
     FileInfoResult,
@@ -143,6 +146,7 @@ AgentReply = (
     | DirectoryListResult
     | FileInfoResult
     | FileWriteResult
+    | FileEditResult
     | FileSearchResult
     | PathMutationResult
     | ProcessListResult
@@ -1353,6 +1357,46 @@ async def write_file(agent_id: str, body: FileWriteBody, settings: SettingsDep) 
 
 
 @app.post(
+    "/api/v1/agents/{agent_id}/files/edit",
+    dependencies=[Depends(require_control_token)],
+)
+async def edit_file(agent_id: str, body: FileEditBody, settings: SettingsDep) -> FileEditResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "file.edit")
+    audit_required(
+        "file_edit_requested",
+        agent_id=agent_id,
+        path=body.path,
+        replace_all=body.replace_all,
+    )
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = FileEditRequest(request_id=request_id, **body.model_dump())
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, FileEditResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "file_edit",
+            agent_id=agent_id,
+            path=body.path,
+            replacements=reply.replacements,
+            bytes_written=reply.bytes_written,
+            rejected=reply.rejected,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent file edit timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
     "/api/v1/agents/{agent_id}/files/search",
     dependencies=[Depends(require_control_token)],
 )
@@ -1792,6 +1836,8 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
                 reply = FileReadResult.model_validate(payload)
             elif message_type == "file_write_result":
                 reply = FileWriteResult.model_validate(payload)
+            elif message_type == "file_edit_result":
+                reply = FileEditResult.model_validate(payload)
             elif message_type == "file_search_result":
                 reply = FileSearchResult.model_validate(payload)
             elif message_type == "path_mutation_result":

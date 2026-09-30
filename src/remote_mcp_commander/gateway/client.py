@@ -13,6 +13,7 @@ from remote_mcp_commander.protocol import (
     CommandSessionOutput,
     CommandSessionSnapshot,
     DirectoryListResult,
+    FileEditResult,
     FileInfoResult,
     FileReadResult,
     FileRootListResult,
@@ -334,6 +335,27 @@ class GatewayClient:
             },
         )
         return FileWriteResult.model_validate(payload)
+
+    async def edit_file(
+        self,
+        agent_id: str,
+        path: str,
+        old_text: str,
+        new_text: str,
+        *,
+        replace_all: bool = False,
+    ) -> FileEditResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/files/edit",
+            json_body={
+                "path": path,
+                "old_text": old_text,
+                "new_text": new_text,
+                "replace_all": replace_all,
+            },
+        )
+        return FileEditResult.model_validate(payload)
 
     async def search_files(
         self,

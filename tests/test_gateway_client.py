@@ -455,3 +455,36 @@ async def test_search_and_path_mutation_methods_use_expected_routes() -> None:
     assert '"parents":true' in requests[1].content.decode()
     assert requests[2].url.path.endswith("/files/copy")
     assert '"destination":"/home/ubuntu/b.txt"' in requests[2].content.decode()
+
+
+@pytest.mark.asyncio
+async def test_edit_file_sends_exact_replacement_payload() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "edit-1",
+                "path": "/home/ubuntu/demo.txt",
+                "replacements": 1,
+                "bytes_written": 5,
+                "sha256": "2" * 64,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    result = await client.edit_file(
+        "server-01",
+        "/home/ubuntu/demo.txt",
+        "old",
+        "new",
+        replace_all=True,
+    )
+    assert result.replacements == 1
+    assert seen[0].url.path.endswith("/files/edit")
+    payload = seen[0].content.decode()
+    assert '"old_text":"old"' in payload
+    assert '"new_text":"new"' in payload
+    assert '"replace_all":true' in payload
