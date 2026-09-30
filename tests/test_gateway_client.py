@@ -488,3 +488,31 @@ async def test_edit_file_sends_exact_replacement_payload() -> None:
     assert '"old_text":"old"' in payload
     assert '"new_text":"new"' in payload
     assert '"replace_all":true' in payload
+
+
+@pytest.mark.asyncio
+async def test_command_clients_send_optional_working_directory() -> None:
+    requests: list[httpx.Request] = []
+    session_id = "c" * 32
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/execute"):
+            return httpx.Response(200, json={"request_id": "e", "returncode": 0})
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "s",
+                "session_id": session_id,
+                "state": "running",
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    cwd = "/srv/project"
+    await client.execute("server-01", ["pwd"], cwd=cwd)
+    await client.start_command_session("server-01", ["pwd"], cwd=cwd)
+
+    assert len(requests) == 2
+    for request in requests:
+        assert b'"cwd":"/srv/project"' in request.content

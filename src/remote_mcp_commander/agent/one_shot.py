@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from collections.abc import Awaitable, Callable
+from pathlib import Path
 
 from remote_mcp_commander.agent.executor import execute_argv
 from remote_mcp_commander.protocol import CommandRequest, CommandResult
@@ -20,6 +21,7 @@ class OneShotCommandDispatcher:
         exec_search_path: str,
         policy_mode: str,
         child_env: dict[str, str],
+        roots: list[Path] | None = None,
     ) -> None:
         self.allowlist = allowlist
         self.timeout_s = timeout_s
@@ -28,6 +30,7 @@ class OneShotCommandDispatcher:
         self.exec_search_path = exec_search_path
         self.policy_mode = policy_mode
         self.child_env = child_env
+        self.roots = roots or []
         self._tasks: set[asyncio.Task[None]] = set()
 
     @property
@@ -69,6 +72,8 @@ class OneShotCommandDispatcher:
             exec_search_path=self.exec_search_path,
             policy_mode=self.policy_mode,
             child_env=self.child_env,
+            cwd=request.cwd,
+            roots=self.roots,
         )
         await send_text(result.model_dump_json())
 

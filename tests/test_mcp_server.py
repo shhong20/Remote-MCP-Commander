@@ -188,3 +188,16 @@ async def test_filesystem_discovery_tools_are_bounded_and_structured() -> None:
     properties = tools["list_directory"].input_schema["properties"]
     assert properties["limit"]["default"] == 200
     assert set(tools["file_info"].input_schema["required"]) == {"agent_id", "path"}
+
+
+@pytest.mark.asyncio
+async def test_command_tools_expose_optional_working_directory() -> None:
+    server = build_mcp(make_settings())
+    async with Client(server) as client:
+        result = await client.list_tools()
+
+    tools = {tool.name: tool for tool in result.tools}
+    for name in ("execute", "start_command", "start_pty"):
+        schema = tools[name].input_schema
+        assert "cwd" in schema["properties"]
+        assert "cwd" not in schema["required"]

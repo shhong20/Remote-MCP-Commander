@@ -124,11 +124,13 @@ class GatewayClient:
         )
         return GitStatusResult.model_validate(payload)
 
-    async def execute(self, agent_id: str, argv: list[str]) -> CommandResult:
+    async def execute(
+        self, agent_id: str, argv: list[str], *, cwd: str | None = None
+    ) -> CommandResult:
         payload = await self._request(
             "POST",
             f"/api/v1/agents/{agent_id}/execute",
-            json_body={"argv": argv},
+            json_body={"argv": argv, "cwd": cwd},
         )
         return CommandResult.model_validate(payload)
 
@@ -136,11 +138,13 @@ class GatewayClient:
         self,
         agent_id: str,
         argv: list[str],
+        *,
+        cwd: str | None = None,
     ) -> CommandSessionSnapshot:
         payload = await self._request(
             "POST",
             f"/api/v1/agents/{agent_id}/commands/sessions",
-            json_body={"argv": argv},
+            json_body={"argv": argv, "cwd": cwd},
         )
         return CommandSessionSnapshot.model_validate(payload)
 
@@ -204,6 +208,7 @@ class GatewayClient:
         approval_id: str,
         approval_secret: str,
         *,
+        cwd: str | None = None,
         columns: int = 80,
         rows: int = 24,
     ) -> PtySessionSnapshot:
@@ -212,6 +217,7 @@ class GatewayClient:
             f"/api/v1/agents/{agent_id}/pty/sessions",
             json_body={
                 "argv": argv,
+                "cwd": cwd,
                 "columns": columns,
                 "rows": rows,
                 "approval_id": approval_id,

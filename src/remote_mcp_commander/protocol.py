@@ -20,6 +20,7 @@ class CommandRequest(BaseModel):
     type: Literal["command_request"] = "command_request"
     request_id: str
     argv: list[CommandArg] = Field(min_length=1, max_length=64)
+    cwd: str | None = Field(default=None, min_length=1, max_length=4096)
 
 
 class CommandResult(BaseModel):
@@ -69,6 +70,7 @@ class Heartbeat(BaseModel):
 
 class ExecuteBody(BaseModel):
     argv: list[CommandArg] = Field(min_length=1, max_length=64)
+    cwd: str | None = Field(default=None, min_length=1, max_length=4096)
 
 
 class AgentInfo(BaseModel):
@@ -594,6 +596,7 @@ class CommandSessionStartRequest(BaseModel):
     request_id: str
     session_id: str = Field(pattern=SESSION_ID_PATTERN)
     argv: list[CommandArg] = Field(min_length=1, max_length=64)
+    cwd: str | None = Field(default=None, min_length=1, max_length=4096)
 
 
 class CommandSessionStatusRequest(BaseModel):
@@ -629,6 +632,7 @@ class CommandSessionSnapshot(BaseModel):
     session_id: str = Field(pattern=SESSION_ID_PATTERN)
     executable: str = ""
     state: CommandSessionState
+    cwd: str | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
     returncode: int | None = None
@@ -666,6 +670,7 @@ class CommandSessionDiscardResult(BaseModel):
 
 class CommandSessionStartBody(BaseModel):
     argv: list[CommandArg] = Field(min_length=1, max_length=64)
+    cwd: str | None = Field(default=None, min_length=1, max_length=4096)
 
 
 class CommandSessionOutputBody(BaseModel):
@@ -679,6 +684,7 @@ class PtySessionStartRequest(BaseModel):
     request_id: str
     session_id: str = Field(pattern=SESSION_ID_PATTERN)
     argv: list[CommandArg] = Field(min_length=1, max_length=64)
+    cwd: str | None = Field(default=None, min_length=1, max_length=4096)
     columns: int = Field(default=80, ge=20, le=500)
     rows: int = Field(default=24, ge=5, le=200)
 
@@ -730,6 +736,7 @@ class PtySessionSnapshot(BaseModel):
     session_id: str = Field(pattern=SESSION_ID_PATTERN)
     executable: str = ""
     state: CommandSessionState
+    cwd: str | None = None
     columns: int = 80
     rows: int = 24
     started_at: datetime | None = None
@@ -783,6 +790,7 @@ class PtySessionDiscardResult(BaseModel):
 
 class PtySessionStartBody(ApprovalUse):
     argv: list[CommandArg] = Field(min_length=1, max_length=64)
+    cwd: str | None = Field(default=None, min_length=1, max_length=4096)
     columns: int = Field(default=80, ge=20, le=500)
     rows: int = Field(default=24, ge=5, le=200)
 

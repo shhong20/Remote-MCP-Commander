@@ -124,14 +124,16 @@ def build_mcp(settings: Settings) -> MCPServer:
         return await GatewayClient(settings).git_status(agent_id, path)
 
     @server.tool()
-    async def execute(agent_id: str, argv: list[str]) -> CommandResult:
-        """Execute an argv command on a device subject to gateway and agent policies."""
-        return await GatewayClient(settings).execute(agent_id, argv)
+    async def execute(agent_id: str, argv: list[str], cwd: str | None = None) -> CommandResult:
+        """Execute argv, optionally in an allowed-root working directory."""
+        return await GatewayClient(settings).execute(agent_id, argv, cwd=cwd)
 
     @server.tool()
-    async def start_command(agent_id: str, argv: list[str]) -> CommandSessionSnapshot:
-        """Start a bounded safe-profile command session and return its session ID."""
-        return await GatewayClient(settings).start_command_session(agent_id, argv)
+    async def start_command(
+        agent_id: str, argv: list[str], cwd: str | None = None
+    ) -> CommandSessionSnapshot:
+        """Start a command session, optionally in an allowed-root working directory."""
+        return await GatewayClient(settings).start_command_session(agent_id, argv, cwd=cwd)
 
     @server.tool()
     async def command_status(agent_id: str, session_id: str) -> CommandSessionSnapshot:
@@ -171,6 +173,7 @@ def build_mcp(settings: Settings) -> MCPServer:
         argv: list[str],
         approval_id: str,
         approval_secret: str,
+        cwd: str | None = None,
         columns: int = 80,
         rows: int = 24,
     ) -> PtySessionSnapshot:
@@ -180,6 +183,7 @@ def build_mcp(settings: Settings) -> MCPServer:
             argv,
             approval_id,
             approval_secret,
+            cwd=cwd,
             columns=columns,
             rows=rows,
         )
