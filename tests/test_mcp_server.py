@@ -234,6 +234,7 @@ async def test_stateful_search_tools_use_bounded_schema() -> None:
     tools = {tool.name: tool for tool in result.tools}
     start = tools["start_search"].input_schema
     assert set(start["required"]) == {"agent_id", "root", "query"}
+    assert start["properties"]["include_hidden"]["default"] is False
     assert start["properties"]["page_size"]["default"] == 50
     assert start["properties"]["max_results"]["default"] == 1000
     more = tools["get_more_search_results"].input_schema

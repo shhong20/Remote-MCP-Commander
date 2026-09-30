@@ -208,3 +208,44 @@ async def test_search_start_dispatcher_rejects_excess_active_searches(
     assert "too many active" in rejected["error"]
     release.set()
     await asyncio.gather(*list(dispatcher._tasks))
+
+
+@pytest.mark.asyncio
+async def test_stateful_search_skips_hidden_paths_by_default(tmp_path: Path) -> None:
+    (tmp_path / "alpha-visible.txt").write_text("visible")
+    (tmp_path / ".alpha-hidden.txt").write_text("hidden")
+    hidden_dir = tmp_path / ".venv"
+    hidden_dir.mkdir()
+    (hidden_dir / "alpha-inside.txt").write_text("hidden-dir")
+    manager = FileSearchSessionManager(roots=[tmp_path.resolve()])
+
+    default_page = await manager.start(
+        "req-default",
+        "7" * 32,
+        str(tmp_path),
+        "alpha",
+        mode="files",
+        file_glob=None,
+        case_sensitive=False,
+        page_size=10,
+        max_results=20,
+    )
+    assert [Path(item.path).name for item in default_page.matches] == ["alpha-visible.txt"]
+
+    hidden_page = await manager.start(
+        "req-hidden",
+        "8" * 32,
+        str(tmp_path),
+        "alpha",
+        mode="files",
+        file_glob=None,
+        case_sensitive=False,
+        page_size=10,
+        max_results=20,
+        include_hidden=True,
+    )
+    assert {Path(item.path).name for item in hidden_page.matches} == {
+        ".alpha-hidden.txt",
+        "alpha-inside.txt",
+        "alpha-visible.txt",
+    }

@@ -27,6 +27,7 @@ def _search_sync(
     file_glob: str | None,
     case_sensitive: bool,
     max_results: int,
+    include_hidden: bool = True,
 ) -> FileSearchResult:
     try:
         root = resolve_allowed_path(raw_root, roots).resolve(strict=True)
@@ -38,8 +39,15 @@ def _search_sync(
         truncated = False
         for current, dirs, files in os.walk(root, followlinks=False):
             current_path = Path(current)
-            dirs[:] = sorted(name for name in dirs if not (current_path / name).is_symlink())
+            dirs[:] = sorted(
+                name
+                for name in dirs
+                if not (current_path / name).is_symlink()
+                and (include_hidden or not name.startswith("."))
+            )
             for name in sorted(files):
+                if not include_hidden and name.startswith("."):
+                    continue
                 if scanned >= MAX_SCAN_FILES:
                     truncated = True
                     break
@@ -98,6 +106,7 @@ async def search_files(
     file_glob: str | None,
     case_sensitive: bool,
     max_results: int,
+    include_hidden: bool = True,
 ) -> FileSearchResult:
     return await asyncio.to_thread(
         _search_sync,
@@ -109,4 +118,5 @@ async def search_files(
         file_glob=file_glob,
         case_sensitive=case_sensitive,
         max_results=max_results,
+        include_hidden=include_hidden,
     )

@@ -358,6 +358,7 @@ class FileSearchSessionStartRequest(BaseModel):
     mode: FileSearchMode = "files"
     file_glob: str | None = Field(default=None, max_length=256)
     case_sensitive: bool = False
+    include_hidden: bool = False
     page_size: int = Field(default=50, ge=1, le=200)
     max_results: int = Field(default=1000, ge=1, le=2000)
 
@@ -404,6 +405,7 @@ class FileSearchSessionStartBody(BaseModel):
     mode: FileSearchMode = "files"
     file_glob: str | None = Field(default=None, max_length=256)
     case_sensitive: bool = False
+    include_hidden: bool = False
     page_size: int = Field(default=50, ge=1, le=200)
     max_results: int = Field(default=1000, ge=1, le=2000)
 

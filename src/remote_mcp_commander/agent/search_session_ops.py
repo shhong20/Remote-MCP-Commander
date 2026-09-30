@@ -70,6 +70,7 @@ class FileSearchSessionManager:
         case_sensitive: bool,
         page_size: int,
         max_results: int,
+        include_hidden: bool = False,
     ) -> FileSearchSessionPage:
         result = await search_files(
             request_id,
@@ -80,6 +81,7 @@ class FileSearchSessionManager:
             file_glob=file_glob,
             case_sensitive=case_sensitive,
             max_results=max_results,
+            include_hidden=include_hidden,
         )
         if result.rejected:
             return self._error_page(request_id, session_id, result.error or "search failed")
@@ -158,6 +160,7 @@ class FileSearchStartDispatcher:
             case_sensitive=request.case_sensitive,
             page_size=request.page_size,
             max_results=request.max_results,
+            include_hidden=request.include_hidden,
         )
         await send_text(result.model_dump_json())
 

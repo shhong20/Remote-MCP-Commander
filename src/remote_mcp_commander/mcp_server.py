@@ -334,6 +334,7 @@ def build_mcp(settings: Settings) -> MCPServer:
         mode: str = "files",
         file_glob: str | None = None,
         case_sensitive: bool = False,
+        include_hidden: bool = False,
         page_size: int = 50,
         max_results: int = 1000,
     ) -> FileSearchSessionPage:
@@ -345,6 +346,7 @@ def build_mcp(settings: Settings) -> MCPServer:
             mode=mode,
             file_glob=file_glob,
             case_sensitive=case_sensitive,
+            include_hidden=include_hidden,
             page_size=page_size,
             max_results=max_results,
         )

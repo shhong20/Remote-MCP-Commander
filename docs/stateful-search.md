@@ -14,6 +14,7 @@ Remote MCP Commander keeps the existing one-shot `search_files` tool and also ex
 - at most 20 search sessions are retained per Agent connection; the oldest session is evicted when that bound is exceeded;
 - content search ignores files larger than 1 MiB and binary/NUL-containing files, matching one-shot search behavior;
 - symlink directories and symlink files are not traversed;
+- hidden files/directories are skipped by default (`include_hidden=false`), matching Desktop Commander-style code search;
 - traversal order is deterministic by sorted directory and file name.
 
 `exhausted=true` means there are no more cached matches in the current search session. `truncated=true` means the bounded scan or match ceiling was reached, so additional matches may exist outside the retained result set.
