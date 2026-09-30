@@ -108,7 +108,10 @@ async def test_mutation_tools_require_external_approval_fields() -> None:
     service_schema = tools["service_action"].input_schema
     assert {"approval_id", "approval_secret"}.issubset(service_schema["required"])
     pty_schema = tools["start_pty"].input_schema
-    assert {"approval_id", "approval_secret"}.issubset(pty_schema["required"])
+    assert "approval_id" in pty_schema["properties"]
+    assert "approval_secret" in pty_schema["properties"]
+    assert "approval_id" not in pty_schema["required"]
+    assert "approval_secret" not in pty_schema["required"]
 
 
 @pytest.mark.asyncio
@@ -152,7 +155,9 @@ async def test_pty_tools_use_structured_contracts() -> None:
     tools = {tool.name: tool for tool in result.tools}
     start = tools["start_pty"].input_schema
     assert start["properties"]["argv"]["type"] == "array"
-    assert {"agent_id", "argv", "approval_id", "approval_secret"}.issubset(start["required"])
+    assert set(start["required"]) == {"agent_id", "argv"}
+    assert "approval_id" in start["properties"]
+    assert "approval_secret" in start["properties"]
     assert start["properties"]["columns"]["default"] == 80
     assert start["properties"]["rows"]["default"] == 24
     assert set(tools["write_pty"].input_schema["required"]) == {

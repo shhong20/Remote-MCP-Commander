@@ -822,8 +822,10 @@ class PtySessionDiscardResult(BaseModel):
     error: str | None = None
 
 
-class PtySessionStartBody(ApprovalUse):
+class PtySessionStartBody(BaseModel):
     argv: list[CommandArg] = Field(min_length=1, max_length=64)
+    approval_id: str | None = Field(default=None, min_length=8, max_length=256)
+    approval_secret: str | None = Field(default=None, min_length=16, max_length=512)
     cwd: str | None = Field(default=None, min_length=1, max_length=4096)
     columns: int = Field(default=80, ge=20, le=500)
     rows: int = Field(default=24, ge=5, le=200)

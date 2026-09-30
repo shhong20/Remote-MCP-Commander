@@ -29,3 +29,9 @@ COMMANDER_ALLOWED_ROOTS_JSON=[]
 
 With the empty root list above, the effective root becomes the Agent user's home directory.
 Structured `search_files`, `create_directory`, `copy_file`, `move_path`, and non-recursive `delete_path` tools are available in v0.29; see `personal-filesystem-tools.md`.
+
+## Interactive PTY approval
+
+In Personal mode, PTY startup does not require an external one-use approval by default. This removes redundant friction because Personal mode already permits broad user-level shell execution. The Agent PTY executable allowlist and OS user permission boundary still apply.
+
+Set `COMMANDER_PERSONAL_PTY_APPROVAL_REQUIRED=true` on the Gateway to restore the one-use approval requirement while keeping the rest of Personal mode enabled. Hardened mode always requires PTY approval regardless of this setting. If either approval field is supplied manually, both fields must be supplied and the approval is consumed normally.

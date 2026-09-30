@@ -164,3 +164,77 @@ async def test_pty_input_audit_records_size_not_content(
     assert event == "pty_session_input_requested"
     assert fields["input_bytes"] == len(b"secret-input\n")
     assert "secret-input" not in str(fields)
+
+
+@pytest.mark.asyncio
+async def test_personal_mode_can_start_pty_without_approval(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    connection = gateway.AgentConnection(websocket=FakePtyWebSocket())  # type: ignore[arg-type]
+    connection.capabilities = ["command.pty"]
+    gateway.connections["server-01"] = connection
+    events: list[str] = []
+    monkeypatch.setattr(gateway, "audit_required", lambda event, **kwargs: events.append(event))
+    monkeypatch.setattr(gateway, "audit", lambda *args, **kwargs: None)
+    settings = Settings(
+        agent_token="agent-placeholder-value",
+        control_token="control-placeholder-value",
+        operation_mode="personal",
+        pty_agent_policies_json='{"server-01":["bash"]}',
+    )
+    try:
+        result = await gateway.start_pty_session(
+            "server-01", PtySessionStartBody(argv=["bash"]), settings
+        )
+    finally:
+        gateway.connections.pop("server-01", None)
+
+    assert result.state == "running"
+    assert "pty_personal_approval_bypassed" in events
+    assert "approval_consumed" not in events
+
+
+@pytest.mark.asyncio
+async def test_personal_mode_can_require_pty_approval() -> None:
+    connection = gateway.AgentConnection(websocket=FakePtyWebSocket())  # type: ignore[arg-type]
+    connection.capabilities = ["command.pty"]
+    gateway.connections["server-01"] = connection
+    settings = Settings(
+        agent_token="agent-placeholder-value",
+        control_token="control-placeholder-value",
+        operation_mode="personal",
+        personal_pty_approval_required=True,
+        pty_agent_policies_json='{"server-01":["bash"]}',
+    )
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            await gateway.start_pty_session(
+                "server-01", PtySessionStartBody(argv=["bash"]), settings
+            )
+        assert exc_info.value.status_code == 403
+        assert "approval is required" in str(exc_info.value.detail)
+    finally:
+        gateway.connections.pop("server-01", None)
+
+
+@pytest.mark.asyncio
+async def test_pty_rejects_partial_approval_fields() -> None:
+    connection = gateway.AgentConnection(websocket=FakePtyWebSocket())  # type: ignore[arg-type]
+    connection.capabilities = ["command.pty"]
+    gateway.connections["server-01"] = connection
+    settings = Settings(
+        agent_token="agent-placeholder-value",
+        control_token="control-placeholder-value",
+        operation_mode="personal",
+        pty_agent_policies_json='{"server-01":["bash"]}',
+    )
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            await gateway.start_pty_session(
+                "server-01",
+                PtySessionStartBody(argv=["bash"], approval_id="approval-123"),
+                settings,
+            )
+        assert exc_info.value.status_code == 422
+    finally:
+        gateway.connections.pop("server-01", None)
