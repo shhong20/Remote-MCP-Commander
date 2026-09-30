@@ -6,6 +6,7 @@ import os
 import signal
 from pathlib import Path
 
+from remote_mcp_commander.agent.env_policy import merge_command_env
 from remote_mcp_commander.agent.file_ops import resolve_allowed_directory
 from remote_mcp_commander.policy import (
     TRUSTED_GENERIC_EXEC_PATH,
@@ -68,6 +69,7 @@ async def execute_argv(
     exec_search_path: str = TRUSTED_GENERIC_EXEC_PATH,
     policy_mode: str = "hardened",
     child_env: dict[str, str] | None = None,
+    env_overrides: dict[str, str] | None = None,
     cwd: str | None = None,
     roots: list[Path] | None = None,
 ) -> CommandResult:
@@ -90,6 +92,11 @@ async def execute_argv(
         )
     try:
         resolved_cwd = resolve_allowed_directory(cwd, roots or []) if cwd is not None else None
+        process_env = merge_command_env(
+            child_env or {"PATH": exec_search_path},
+            env_overrides or {},
+            personal_mode=policy_mode == "personal",
+        )
     except (OSError, PermissionError, ValueError) as exc:
         return CommandResult(request_id=request_id, rejected=True, error=str(exc))
 
@@ -99,7 +106,7 @@ async def execute_argv(
             *argv[1:],
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
-            env=child_env or {"PATH": exec_search_path},
+            env=process_env,
             cwd=resolved_cwd,
             start_new_session=(os.name == "posix"),
         )

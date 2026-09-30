@@ -201,3 +201,40 @@ async def test_completed_session_can_be_discarded_but_running_session_cannot(
     assert rejected.rejected is True
     assert rejected.error == "running session cannot be discarded"
     await manager.cancel_all()
+
+
+@pytest.mark.asyncio
+async def test_personal_command_session_receives_env_override(tmp_path: Path) -> None:
+    make_fake_uptime(
+        tmp_path,
+        "import os\nprint(os.environ.get('DEMO_FLAG', 'missing'))\n",
+    )
+    manager = make_manager(
+        exec_search_path=str(tmp_path),
+        policy_mode="personal",
+        child_env={"PATH": str(tmp_path)},
+    )
+    session_id = "7" * 32
+    started = await manager.start(
+        "start",
+        session_id,
+        ["uptime"],
+        env_overrides={"DEMO_FLAG": "session-value"},
+    )
+    assert started.rejected is False
+    result = await wait_terminal(manager, session_id)
+    assert result.stdout.strip() == "session-value"
+
+
+@pytest.mark.asyncio
+async def test_hardened_command_session_rejects_env_override(tmp_path: Path) -> None:
+    make_fake_uptime(tmp_path, "print('should-not-run')\n")
+    manager = make_manager(exec_search_path=str(tmp_path))
+    result = await manager.start(
+        "start",
+        "8" * 32,
+        ["uptime"],
+        env_overrides={"DEMO_FLAG": "blocked"},
+    )
+    assert result.rejected is True
+    assert "Personal mode" in (result.error or "")

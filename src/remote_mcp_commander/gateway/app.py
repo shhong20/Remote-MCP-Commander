@@ -572,6 +572,8 @@ async def execute(agent_id: str, body: ExecuteBody, settings: SettingsDep) -> Co
     enforce_agent_policy(agent_id, body.argv, settings)
     if body.cwd is not None:
         require_agent_capability(connection, "command.cwd")
+    if body.env:
+        require_agent_capability(connection, "command.env")
     request_id = uuid.uuid4().hex
     future = pending_request(connection, request_id)
     audit(
@@ -581,10 +583,13 @@ async def execute(agent_id: str, body: ExecuteBody, settings: SettingsDep) -> Co
         executable=Path(body.argv[0]).name,
         argc=len(body.argv),
         cwd=body.cwd,
+        env_keys=sorted(body.env),
     )
 
     try:
-        request = CommandRequest(request_id=request_id, argv=body.argv, cwd=body.cwd)
+        request = CommandRequest(
+            request_id=request_id, argv=body.argv, cwd=body.cwd, env=body.env
+        )
         await connection.websocket.send_text(request.model_dump_json())
         reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
         if not isinstance(reply, CommandResult):
@@ -620,6 +625,8 @@ async def start_command_session(
     enforce_agent_policy(agent_id, body.argv, settings)
     if body.cwd is not None:
         require_agent_capability(connection, "command.cwd")
+    if body.env:
+        require_agent_capability(connection, "command.env")
     request_id = uuid.uuid4().hex
     session_id = uuid.uuid4().hex
     future = pending_request(connection, request_id)
@@ -630,6 +637,7 @@ async def start_command_session(
         executable=Path(body.argv[0]).name,
         argc=len(body.argv),
         cwd=body.cwd,
+        env_keys=sorted(body.env),
     )
     try:
         request = CommandSessionStartRequest(
@@ -637,6 +645,7 @@ async def start_command_session(
             session_id=session_id,
             argv=body.argv,
             cwd=body.cwd,
+            env=body.env,
         )
         await connection.websocket.send_text(request.model_dump_json())
         reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
@@ -807,8 +816,10 @@ async def start_pty_session(
     require_agent_capability(connection, "command.pty")
     if body.cwd is not None:
         require_agent_capability(connection, "command.cwd")
+    if body.env:
+        require_agent_capability(connection, "command.env")
     enforce_pty_policy(agent_id, body.argv, settings)
-    target = pty_approval_target(body.argv, body.cwd)
+    target = pty_approval_target(body.argv, body.cwd, body.env)
     has_approval_id = body.approval_id is not None
     has_approval_secret = body.approval_secret is not None
     if has_approval_id != has_approval_secret:
@@ -857,6 +868,7 @@ async def start_pty_session(
         columns=body.columns,
         rows=body.rows,
         cwd=body.cwd,
+        env_keys=sorted(body.env),
     )
     future = pending_request(connection, request_id)
     try:
@@ -865,6 +877,7 @@ async def start_pty_session(
             session_id=session_id,
             argv=body.argv,
             cwd=body.cwd,
+            env=body.env,
             columns=body.columns,
             rows=body.rows,
         )

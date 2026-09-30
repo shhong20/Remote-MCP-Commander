@@ -116,8 +116,20 @@ def validate_pty_argv(argv: list[str]) -> str | None:
     return None
 
 
-def pty_approval_target(argv: list[str], cwd: str | None = None) -> str:
-    payload: object = argv if cwd is None else {"argv": argv, "cwd": cwd}
+def pty_approval_target(
+    argv: list[str],
+    cwd: str | None = None,
+    env: dict[str, str] | None = None,
+) -> str:
+    if cwd is None and not env:
+        payload: object = argv
+    else:
+        structured: dict[str, object] = {"argv": argv}
+        if cwd is not None:
+            structured["cwd"] = cwd
+        if env:
+            structured["env"] = env
+        payload = structured
     canonical = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     return f"argv-sha256:{hashlib.sha256(canonical.encode()).hexdigest()}"
 

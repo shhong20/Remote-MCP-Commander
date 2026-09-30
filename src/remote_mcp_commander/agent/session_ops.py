@@ -8,6 +8,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from remote_mcp_commander.agent.env_policy import merge_command_env
 from remote_mcp_commander.agent.file_ops import resolve_allowed_directory
 from remote_mcp_commander.policy import (
     TRUSTED_GENERIC_EXEC_PATH,
@@ -113,6 +114,7 @@ class CommandSessionManager:
         argv: list[str],
         *,
         cwd: str | None = None,
+        env_overrides: dict[str, str] | None = None,
     ) -> CommandSessionSnapshot:
         policy_error = validate_generic_argv(argv, mode=self.policy_mode)
         if policy_error is not None:
@@ -133,6 +135,11 @@ class CommandSessionManager:
             )
         try:
             resolved_cwd = resolve_allowed_directory(cwd, self.roots) if cwd is not None else None
+            process_env = merge_command_env(
+                self.child_env,
+                env_overrides or {},
+                personal_mode=self.policy_mode == "personal",
+            )
         except (OSError, PermissionError, ValueError) as exc:
             return self._error_snapshot(request_id, session_id, str(exc))
 
@@ -153,7 +160,7 @@ class CommandSessionManager:
                     *argv[1:],
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
-                    env=self.child_env,
+                    env=process_env,
                     cwd=resolved_cwd,
                     start_new_session=(os.name == "posix"),
                 )

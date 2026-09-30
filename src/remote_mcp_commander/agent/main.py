@@ -126,6 +126,7 @@ async def agent_loop() -> None:
                     history_limit=settings.session_history_limit,
                     exec_search_path=settings.command_search_path,
                     child_env=settings.command_environment,
+                    personal_mode=settings.personal_mode,
                     roots=roots,
                 )
                 one_shot = OneShotCommandDispatcher(
@@ -205,6 +206,7 @@ async def agent_loop() -> None:
                                 request.session_id,
                                 request.argv,
                                 cwd=request.cwd,
+                                env_overrides=request.env,
                             )
                             await websocket.send(result.model_dump_json())
                             continue
@@ -246,6 +248,7 @@ async def agent_loop() -> None:
                                 request.session_id,
                                 request.argv,
                                 cwd=request.cwd,
+                                env_overrides=request.env,
                                 columns=request.columns,
                                 rows=request.rows,
                             )

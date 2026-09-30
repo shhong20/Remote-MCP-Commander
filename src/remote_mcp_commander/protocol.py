@@ -11,6 +11,9 @@ PROTOCOL_MAX_SUPPORTED = 1
 AGENT_ID_PATTERN = r"^[A-Za-z0-9_.-]{1,128}$"
 SESSION_ID_PATTERN = r"^[a-f0-9]{32}$"
 CommandArg = Annotated[str, Field(min_length=1, max_length=4096)]
+EnvKey = Annotated[str, Field(min_length=1, max_length=64, pattern=r"^[A-Za-z_][A-Za-z0-9_]*$")]
+EnvValue = Annotated[str, Field(max_length=4096)]
+CommandEnv = dict[EnvKey, EnvValue]
 FilePath = Annotated[str, Field(min_length=1, max_length=4096)]
 CapabilityName = Annotated[
     str, Field(min_length=1, max_length=64, pattern=r"^[a-z][a-z0-9_.-]{0,63}$")
@@ -22,6 +25,7 @@ class CommandRequest(BaseModel):
     request_id: str
     argv: list[CommandArg] = Field(min_length=1, max_length=64)
     cwd: str | None = Field(default=None, min_length=1, max_length=4096)
+    env: CommandEnv = Field(default_factory=dict, max_length=32)
 
 
 class CommandResult(BaseModel):
@@ -72,6 +76,7 @@ class Heartbeat(BaseModel):
 class ExecuteBody(BaseModel):
     argv: list[CommandArg] = Field(min_length=1, max_length=64)
     cwd: str | None = Field(default=None, min_length=1, max_length=4096)
+    env: CommandEnv = Field(default_factory=dict, max_length=32)
 
 
 class AgentInfo(BaseModel):
@@ -817,6 +822,7 @@ class CommandSessionStartRequest(BaseModel):
     session_id: str = Field(pattern=SESSION_ID_PATTERN)
     argv: list[CommandArg] = Field(min_length=1, max_length=64)
     cwd: str | None = Field(default=None, min_length=1, max_length=4096)
+    env: CommandEnv = Field(default_factory=dict, max_length=32)
 
 
 class CommandSessionStatusRequest(BaseModel):
@@ -891,6 +897,7 @@ class CommandSessionDiscardResult(BaseModel):
 class CommandSessionStartBody(BaseModel):
     argv: list[CommandArg] = Field(min_length=1, max_length=64)
     cwd: str | None = Field(default=None, min_length=1, max_length=4096)
+    env: CommandEnv = Field(default_factory=dict, max_length=32)
 
 
 class CommandSessionOutputBody(BaseModel):
@@ -905,6 +912,7 @@ class PtySessionStartRequest(BaseModel):
     session_id: str = Field(pattern=SESSION_ID_PATTERN)
     argv: list[CommandArg] = Field(min_length=1, max_length=64)
     cwd: str | None = Field(default=None, min_length=1, max_length=4096)
+    env: CommandEnv = Field(default_factory=dict, max_length=32)
     columns: int = Field(default=80, ge=20, le=500)
     rows: int = Field(default=24, ge=5, le=200)
 
@@ -1010,6 +1018,7 @@ class PtySessionDiscardResult(BaseModel):
 
 class PtySessionStartBody(BaseModel):
     argv: list[CommandArg] = Field(min_length=1, max_length=64)
+    env: CommandEnv = Field(default_factory=dict, max_length=32)
     approval_id: str | None = Field(default=None, min_length=8, max_length=256)
     approval_secret: str | None = Field(default=None, min_length=16, max_length=512)
     cwd: str | None = Field(default=None, min_length=1, max_length=4096)

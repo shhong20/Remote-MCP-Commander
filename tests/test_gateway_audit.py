@@ -1,6 +1,7 @@
 import json
 
 import pytest
+from fastapi import HTTPException
 
 from remote_mcp_commander.config import Settings
 from remote_mcp_commander.gateway import app as gateway
@@ -40,3 +41,49 @@ async def test_command_audit_does_not_log_argument_values(monkeypatch: pytest.Mo
     assert requested["argc"] == 2
     assert "argv" not in requested
     assert "sensitive-argument" not in str(requested)
+
+
+@pytest.mark.asyncio
+async def test_command_env_audit_logs_keys_not_values(monkeypatch: pytest.MonkeyPatch) -> None:
+    events: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(gateway, "audit", lambda event, **fields: events.append((event, fields)))
+    connection = gateway.AgentConnection(websocket=FakeWebSocket())
+    connection.capabilities = ["command.env"]
+    gateway.connections["server-01"] = connection
+    settings = Settings(
+        agent_token="agent-placeholder-value",
+        control_token="control-placeholder-value",
+        operation_mode="personal",
+    )
+    try:
+        await gateway.execute(
+            "server-01",
+            ExecuteBody(argv=["echo", "ok"], env={"DEMO_TOKEN": "do-not-log-this-value"}),
+            settings,
+        )
+    finally:
+        gateway.connections.pop("server-01", None)
+
+    requested = next(fields for event, fields in events if event == "command_requested")
+    assert requested["env_keys"] == ["DEMO_TOKEN"]
+    assert "do-not-log-this-value" not in str(requested)
+
+
+@pytest.mark.asyncio
+async def test_command_env_requires_agent_capability() -> None:
+    gateway.connections["server-01"] = gateway.AgentConnection(websocket=FakeWebSocket())
+    settings = Settings(
+        agent_token="agent-placeholder-value",
+        control_token="control-placeholder-value",
+        operation_mode="personal",
+    )
+    try:
+        with pytest.raises(HTTPException) as exc_info:
+            await gateway.execute(
+                "server-01",
+                ExecuteBody(argv=["echo", "ok"], env={"DEMO": "1"}),
+                settings,
+            )
+        assert getattr(exc_info.value, "status_code", None) == 409
+    finally:
+        gateway.connections.pop("server-01", None)

@@ -53,6 +53,9 @@ def detect_capabilities(settings: Settings, roots: list[Path]) -> list[str]:
         if shutil.which("git", path=TRUSTED_GIT_PATH) is not None:
             capabilities.add("git.status")
 
+    if settings.personal_mode:
+        capabilities.add("command.env")
+
     configured = settings.executable_allowlist.intersection(
         generic_executables_for_mode(settings.operation_mode)
     )
