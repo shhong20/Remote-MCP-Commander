@@ -190,6 +190,34 @@ class FileReadManyBody(BaseModel):
     max_total_bytes: int = Field(default=262_144, ge=4, le=524_288)
 
 
+class FileLineReadRequest(BaseModel):
+    type: Literal["file_line_read_request"] = "file_line_read_request"
+    request_id: str
+    path: str = Field(min_length=1, max_length=4096)
+    offset: int = Field(default=0, ge=-1000, le=1_000_000)
+    max_lines: int = Field(default=200, ge=1, le=1000)
+
+
+class FileLineReadResult(BaseModel):
+    type: Literal["file_line_read_result"] = "file_line_read_result"
+    request_id: str
+    path: str = ""
+    content: str = ""
+    total_lines: int = 0
+    start_line: int = 0
+    next_line: int = 0
+    eof: bool = True
+    sha256: str | None = None
+    rejected: bool = False
+    error: str | None = None
+
+
+class FileLineReadBody(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+    offset: int = Field(default=0, ge=-1000, le=1_000_000)
+    max_lines: int = Field(default=200, ge=1, le=1000)
+
+
 class FileWriteRequest(BaseModel):
     type: Literal["file_write_request"] = "file_write_request"
     request_id: str

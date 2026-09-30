@@ -9,6 +9,7 @@ from pathlib import Path
 
 from remote_mcp_commander.protocol import (
     FileAppendResult,
+    FileLineReadResult,
     FileReadManyItem,
     FileReadManyResult,
     FileReadResult,
@@ -114,6 +115,52 @@ def _read_text_file_sync(
         )
     except (OSError, PermissionError, ValueError) as exc:
         return FileReadResult(request_id=request_id, rejected=True, error=str(exc))
+
+
+def _read_text_lines_sync(
+    request_id: str,
+    raw_path: str,
+    *,
+    roots: list[Path],
+    offset: int,
+    max_lines: int,
+    max_file_bytes: int,
+) -> FileLineReadResult:
+    try:
+        path = resolve_allowed_path(raw_path, roots).resolve(strict=True)
+        if not path.is_file():
+            raise PermissionError("not a regular file")
+        data = path.read_bytes()
+        if len(data) > max_file_bytes:
+            raise ValueError("file exceeds size limit")
+        if b"\x00" in data:
+            raise ValueError("binary files are not supported")
+        text = data.decode("utf-8")
+        lines = text.splitlines(keepends=True)
+        total = len(lines)
+        if offset < 0:
+            start = max(total + offset, 0)
+            end = total
+        else:
+            start = min(offset, total)
+            end = min(start + max_lines, total)
+        return FileLineReadResult(
+            request_id=request_id, path=str(path), content="".join(lines[start:end]),
+            total_lines=total, start_line=start, next_line=end, eof=end >= total,
+            sha256=hashlib.sha256(data).hexdigest(),
+        )
+    except (OSError, PermissionError, UnicodeDecodeError, ValueError) as exc:
+        return FileLineReadResult(request_id=request_id, rejected=True, error=str(exc))
+
+
+async def read_text_lines(
+    request_id: str, raw_path: str, *, roots: list[Path], offset: int,
+    max_lines: int, max_file_bytes: int,
+) -> FileLineReadResult:
+    return await asyncio.to_thread(
+        _read_text_lines_sync, request_id, raw_path, roots=roots, offset=offset,
+        max_lines=max_lines, max_file_bytes=max_file_bytes,
+    )
 
 
 def _write_text_file_sync(

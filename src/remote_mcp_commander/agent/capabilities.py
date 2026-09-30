@@ -43,6 +43,7 @@ def detect_capabilities(settings: Settings, roots: list[Path]) -> list[str]:
                 "filesystem.search_session",
                 "filesystem.tree",
                 "file.read",
+                "file.read_lines",
                 "file.read_many",
                 "file.write",
                 "file.append",

@@ -16,6 +16,7 @@ from remote_mcp_commander.agent.file_ops import (
     append_text_file,
     read_many_text_files,
     read_text_file,
+    read_text_lines,
     write_text_file,
 )
 from remote_mcp_commander.agent.filesystem_ops import (
@@ -58,6 +59,7 @@ from remote_mcp_commander.protocol import (
     FileAppendRequest,
     FileEditRequest,
     FileInfoRequest,
+    FileLineReadRequest,
     FileReadManyRequest,
     FileReadRequest,
     FileRootListRequest,
@@ -399,6 +401,16 @@ async def agent_loop() -> None:
                                 roots=roots,
                                 offset=request.offset,
                                 max_bytes=request.max_bytes,
+                                max_file_bytes=settings.file_max_bytes,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "file_line_read_request":
+                            request = FileLineReadRequest.model_validate(payload)
+                            result = await read_text_lines(
+                                request.request_id, request.path, roots=roots,
+                                offset=request.offset, max_lines=request.max_lines,
                                 max_file_bytes=settings.file_max_bytes,
                             )
                             await websocket.send(result.model_dump_json())

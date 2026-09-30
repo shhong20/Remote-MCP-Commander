@@ -809,3 +809,31 @@ async def test_append_file_client_sends_content_and_expected_hash() -> None:
     payload = seen[0].content.decode()
     assert '"content":"hello"' in payload
     assert f'"expected_sha256":"{"0" * 64}"' in payload
+
+
+@pytest.mark.asyncio
+async def test_line_read_client_sends_offset_and_limit() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "lines",
+                "path": "/srv/app.py",
+                "content": "line\n",
+                "total_lines": 10,
+                "start_line": 4,
+                "next_line": 5,
+                "eof": False,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    result = await client.read_file_lines("server-01", "/srv/app.py", offset=4, max_lines=1)
+    assert result.start_line == 4
+    assert seen[0].url.path.endswith("/files/read-lines")
+    payload = seen[0].content.decode()
+    assert '"offset":4' in payload
+    assert '"max_lines":1' in payload

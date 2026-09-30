@@ -58,6 +58,7 @@ def test_capabilities_reflect_available_tools_and_allowed_roots(
         "filesystem.search_session",
         "filesystem.tree",
         "file.read",
+        "file.read_lines",
         "file.read_many",
         "file.write",
         "file.append",
