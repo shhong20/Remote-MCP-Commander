@@ -596,3 +596,58 @@ async def test_stateful_search_client_uses_session_routes() -> None:
     assert requests[1].url.path.endswith(f"/{session_id}/more")
     assert b'"limit":30' in requests[1].content
     assert requests[2].url.path.endswith(f"/{session_id}/stop")
+
+
+@pytest.mark.asyncio
+async def test_tree_client_uses_inspect_copy_and_delete_routes() -> None:
+    requests: list[httpx.Request] = []
+    tree_hash = "a" * 64
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/inspect"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "inspect",
+                    "path": "/srv/tree",
+                    "entries": 2,
+                    "total_bytes": 10,
+                    "tree_sha256": tree_hash,
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "mutation",
+                "operation": "copy_tree" if request.url.path.endswith("/copy") else "delete_tree",
+                "path": "/srv/tree",
+                "changed": True,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    await client.inspect_tree("server-01", "/srv/tree", max_entries=100, max_total_bytes=1024)
+    await client.mutate_tree(
+        "server-01",
+        "copy_tree",
+        "/srv/tree",
+        tree_hash,
+        destination="/srv/tree-copy",
+        max_entries=100,
+        max_total_bytes=1024,
+    )
+    await client.mutate_tree(
+        "server-01",
+        "delete_tree",
+        "/srv/tree",
+        tree_hash,
+        max_entries=100,
+        max_total_bytes=1024,
+    )
+
+    assert requests[0].url.path.endswith("/files/tree/inspect")
+    assert requests[1].url.path.endswith("/files/tree/copy")
+    assert b'"destination":"/srv/tree-copy"' in requests[1].content
+    assert requests[2].url.path.endswith("/files/tree/delete")
+    assert tree_hash.encode() in requests[2].content

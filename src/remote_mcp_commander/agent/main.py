@@ -34,6 +34,7 @@ from remote_mcp_commander.agent.system_ops import (
     service_status,
     terminate_process,
 )
+from remote_mcp_commander.agent.tree_ops import inspect_tree, mutate_tree
 from remote_mcp_commander.config import get_settings
 from remote_mcp_commander.protocol import (
     PROTOCOL_MAX_SUPPORTED,
@@ -75,6 +76,8 @@ from remote_mcp_commander.protocol import (
     ServiceLogsRequest,
     ServiceStatusRequest,
     SystemHealthRequest,
+    TreeInspectRequest,
+    TreeMutationRequest,
 )
 
 
@@ -427,6 +430,33 @@ async def agent_loop() -> None:
                                 destination=request.destination,
                                 parents=request.parents,
                                 overwrite=request.overwrite,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "tree_inspect_request":
+                            request = TreeInspectRequest.model_validate(payload)
+                            result = await inspect_tree(
+                                request.request_id,
+                                request.path,
+                                roots=roots,
+                                max_entries=request.max_entries,
+                                max_total_bytes=request.max_total_bytes,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "tree_mutation_request":
+                            request = TreeMutationRequest.model_validate(payload)
+                            result = await mutate_tree(
+                                request.request_id,
+                                request.operation,
+                                request.path,
+                                roots=roots,
+                                destination=request.destination,
+                                expected_tree_sha256=request.expected_tree_sha256,
+                                max_entries=request.max_entries,
+                                max_total_bytes=request.max_total_bytes,
                             )
                             await websocket.send(result.model_dump_json())
                             continue
