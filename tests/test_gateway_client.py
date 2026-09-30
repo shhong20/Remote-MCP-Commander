@@ -781,3 +781,31 @@ async def test_directory_tree_client_sends_bounded_recursive_options() -> None:
     assert '"include_hidden":true' in payload
     assert '"per_directory_limit":25' in payload
     assert '"max_entries":250' in payload
+
+
+@pytest.mark.asyncio
+async def test_append_file_client_sends_content_and_expected_hash() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "append",
+                "path": "/srv/notes.txt",
+                "bytes_appended": 5,
+                "size": 10,
+                "sha256": "1" * 64,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    result = await client.append_file(
+        "server-01", "/srv/notes.txt", "hello", expected_sha256="0" * 64
+    )
+    assert result.bytes_appended == 5
+    assert seen[0].url.path.endswith("/files/append")
+    payload = seen[0].content.decode()
+    assert '"content":"hello"' in payload
+    assert f'"expected_sha256":"{"0" * 64}"' in payload
