@@ -781,26 +781,45 @@ async def start_pty_session(
         require_agent_capability(connection, "command.cwd")
     enforce_pty_policy(agent_id, body.argv, settings)
     target = pty_approval_target(body.argv, body.cwd)
-    try:
-        grant = await approval_store().consume(
-            approval_id=body.approval_id,
-            secret=body.approval_secret,
-            agent_id=agent_id,
-            operation="pty.start",
-            target=target,
+    has_approval_id = body.approval_id is not None
+    has_approval_secret = body.approval_secret is not None
+    if has_approval_id != has_approval_secret:
+        raise HTTPException(
+            status_code=422, detail="both PTY approval fields are required together"
         )
-    except ApprovalError as exc:
-        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    approval_required = not settings.personal_mode or settings.personal_pty_approval_required
+    grant = None
+    if approval_required or has_approval_id:
+        if body.approval_id is None or body.approval_secret is None:
+            raise HTTPException(status_code=403, detail="PTY approval is required")
+        try:
+            grant = await approval_store().consume(
+                approval_id=body.approval_id,
+                secret=body.approval_secret,
+                agent_id=agent_id,
+                operation="pty.start",
+                target=target,
+            )
+        except ApprovalError as exc:
+            raise HTTPException(status_code=403, detail=str(exc)) from exc
 
     request_id = uuid.uuid4().hex
     session_id = uuid.uuid4().hex
-    audit_required(
-        "approval_consumed",
-        approval_id=grant.approval_id,
-        agent_id=agent_id,
-        operation=grant.operation,
-        target=grant.target,
-    )
+    if grant is not None:
+        audit_required(
+            "approval_consumed",
+            approval_id=grant.approval_id,
+            agent_id=agent_id,
+            operation=grant.operation,
+            target=grant.target,
+        )
+    else:
+        audit_required(
+            "pty_personal_approval_bypassed",
+            agent_id=agent_id,
+            target=target,
+        )
     audit_required(
         "pty_session_start_requested",
         agent_id=agent_id,

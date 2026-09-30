@@ -172,13 +172,13 @@ def build_mcp(settings: Settings) -> MCPServer:
     async def start_pty(
         agent_id: str,
         argv: list[str],
-        approval_id: str,
-        approval_secret: str,
+        approval_id: str | None = None,
+        approval_secret: str | None = None,
         cwd: str | None = None,
         columns: int = 80,
         rows: int = 24,
     ) -> PtySessionSnapshot:
-        """Start an approved interactive POSIX PTY under separate Agent and Gateway policy."""
+        """Start an interactive PTY. Hardened mode requires one-use approval."""
         return await GatewayClient(settings).start_pty_session(
             agent_id,
             argv,
