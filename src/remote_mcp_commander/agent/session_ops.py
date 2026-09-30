@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import asyncio
 import codecs
+import os
+import signal
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from remote_mcp_commander.agent.file_ops import resolve_allowed_directory
 from remote_mcp_commander.policy import (
     TRUSTED_GENERIC_EXEC_PATH,
     resolve_generic_executable,
@@ -25,6 +28,7 @@ class _CommandSession:
     executable: str
     process: asyncio.subprocess.Process
     started_at: datetime
+    cwd: str | None = None
     state: CommandSessionState = "running"
     finished_at: datetime | None = None
     returncode: int | None = None
@@ -49,6 +53,7 @@ class CommandSessionManager:
         exec_search_path: str = TRUSTED_GENERIC_EXEC_PATH,
         policy_mode: str = "hardened",
         child_env: dict[str, str] | None = None,
+        roots: list[Path] | None = None,
     ) -> None:
         self.allowlist = allowlist
         self.timeout_s = timeout_s
@@ -58,6 +63,7 @@ class CommandSessionManager:
         self.exec_search_path = exec_search_path
         self.policy_mode = policy_mode
         self.child_env = child_env or {"PATH": exec_search_path}
+        self.roots = roots or []
         self._sessions: dict[str, _CommandSession] = {}
         self._lock = asyncio.Lock()
 
@@ -67,6 +73,7 @@ class CommandSessionManager:
             session_id=session.session_id,
             executable=session.executable,
             state=session.state,
+            cwd=session.cwd,
             started_at=session.started_at,
             finished_at=session.finished_at,
             returncode=session.returncode,
@@ -104,6 +111,8 @@ class CommandSessionManager:
         request_id: str,
         session_id: str,
         argv: list[str],
+        *,
+        cwd: str | None = None,
     ) -> CommandSessionSnapshot:
         policy_error = validate_generic_argv(argv, mode=self.policy_mode)
         if policy_error is not None:
@@ -122,6 +131,10 @@ class CommandSessionManager:
                 session_id,
                 f"executable not found in trusted path: {executable}",
             )
+        try:
+            resolved_cwd = resolve_allowed_directory(cwd, self.roots) if cwd is not None else None
+        except (OSError, PermissionError, ValueError) as exc:
+            return self._error_snapshot(request_id, session_id, str(exc))
 
         async with self._lock:
             self._prune_completed()
@@ -141,6 +154,8 @@ class CommandSessionManager:
                     stdout=asyncio.subprocess.PIPE,
                     stderr=asyncio.subprocess.PIPE,
                     env=self.child_env,
+                    cwd=resolved_cwd,
+                    start_new_session=(os.name == "posix"),
                 )
             except FileNotFoundError:
                 return self._error_snapshot(request_id, session_id, "executable not found")
@@ -156,6 +171,7 @@ class CommandSessionManager:
                 executable=executable,
                 process=process,
                 started_at=datetime.now(UTC),
+                cwd=str(resolved_cwd) if resolved_cwd is not None else None,
             )
             self._sessions[session_id] = session
             session.task = asyncio.create_task(self._run(session))
@@ -197,12 +213,23 @@ class CommandSessionManager:
     async def _terminate_process(self, session: _CommandSession) -> None:
         if session.process.returncode is not None:
             return
-        session.process.terminate()
+        try:
+            if os.name == "posix":
+                os.killpg(session.process.pid, signal.SIGTERM)
+            else:
+                session.process.terminate()
+        except ProcessLookupError:
+            return
         try:
             await asyncio.wait_for(session.process.wait(), timeout=2)
         except TimeoutError:
-            if session.process.returncode is None:
-                session.process.kill()
+            try:
+                if os.name == "posix":
+                    os.killpg(session.process.pid, signal.SIGKILL)
+                elif session.process.returncode is None:
+                    session.process.kill()
+            except ProcessLookupError:
+                pass
             await session.process.wait()
 
     async def _run(self, session: _CommandSession) -> None:

@@ -16,3 +16,13 @@ def test_pty_target_cli_rejects_absolute_executable(monkeypatch) -> None:
     monkeypatch.setattr(sys, "argv", ["remote-mcp-pty-target", "--", "/bin/bash"])
     with pytest.raises(SystemExit, match="bare executable name"):
         run()
+
+
+def test_pty_target_cli_binds_cwd(monkeypatch, capsys) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        ["remote-mcp-pty-target", "--cwd", "/home/ubuntu/project", "--", "bash"],
+    )
+    run()
+    assert capsys.readouterr().out.strip() == pty_approval_target(["bash"], "/home/ubuntu/project")

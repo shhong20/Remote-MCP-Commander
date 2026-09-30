@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 
+from remote_mcp_commander.agent.file_ops import resolve_allowed_directory
 from remote_mcp_commander.policy import TRUSTED_GENERIC_EXEC_PATH, validate_pty_argv
 from remote_mcp_commander.protocol import (
     CommandSessionState,
@@ -31,6 +32,7 @@ class _PtySession:
     columns: int
     rows: int
     started_at: datetime
+    cwd: str | None = None
     state: CommandSessionState = "running"
     finished_at: datetime | None = None
     returncode: int | None = None
@@ -79,6 +81,7 @@ class PtySessionManager:
         history_limit: int = 100,
         exec_search_path: str = TRUSTED_GENERIC_EXEC_PATH,
         child_env: dict[str, str] | None = None,
+        roots: list[Path] | None = None,
     ) -> None:
         self.allowlist = allowlist
         self.timeout_s = timeout_s
@@ -88,6 +91,7 @@ class PtySessionManager:
         self.history_limit = history_limit
         self.exec_search_path = exec_search_path
         self.child_env = child_env or {"PATH": exec_search_path}
+        self.roots = roots or []
         self._sessions: dict[str, _PtySession] = {}
         self._lock = asyncio.Lock()
 
@@ -97,6 +101,7 @@ class PtySessionManager:
             session_id=session.session_id,
             executable=session.executable,
             state=session.state,
+            cwd=session.cwd,
             columns=session.columns,
             rows=session.rows,
             started_at=session.started_at,
@@ -133,6 +138,7 @@ class PtySessionManager:
         session_id: str,
         argv: list[str],
         *,
+        cwd: str | None = None,
         columns: int,
         rows: int,
     ) -> PtySessionSnapshot:
@@ -155,6 +161,10 @@ class PtySessionManager:
                 session_id,
                 f"PTY executable not found in trusted path: {executable}",
             )
+        try:
+            resolved_cwd = resolve_allowed_directory(cwd, self.roots) if cwd is not None else None
+        except (OSError, PermissionError, ValueError) as exc:
+            return self._error_snapshot(request_id, session_id, str(exc))
 
         async with self._lock:
             self._prune_completed()
@@ -176,6 +186,7 @@ class PtySessionManager:
                     stdin=slave_fd,
                     stdout=slave_fd,
                     stderr=slave_fd,
+                    cwd=resolved_cwd,
                     env={
                         **self.child_env,
                         "TERM": self.child_env.get("TERM", "xterm-256color"),
@@ -202,6 +213,7 @@ class PtySessionManager:
                 columns=columns,
                 rows=rows,
                 started_at=datetime.now(UTC),
+                cwd=str(resolved_cwd) if resolved_cwd is not None else None,
             )
             self._sessions[session_id] = session
             session.task = asyncio.create_task(self._run(session))

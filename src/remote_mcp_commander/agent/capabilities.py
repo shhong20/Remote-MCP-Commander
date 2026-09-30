@@ -41,6 +41,7 @@ def detect_capabilities(settings: Settings, roots: list[Path]) -> list[str]:
                 "file.read",
                 "file.write",
                 "file.edit",
+                "command.cwd",
             }
         )
         if settings.operation_mode == "personal":

@@ -96,6 +96,7 @@ async def agent_loop() -> None:
                     exec_search_path=settings.command_search_path,
                     policy_mode=settings.operation_mode,
                     child_env=settings.command_environment,
+                    roots=roots,
                 )
                 pty_sessions = PtySessionManager(
                     allowlist=settings.pty_executable_allowlist,
@@ -106,6 +107,7 @@ async def agent_loop() -> None:
                     history_limit=settings.session_history_limit,
                     exec_search_path=settings.command_search_path,
                     child_env=settings.command_environment,
+                    roots=roots,
                 )
                 one_shot = OneShotCommandDispatcher(
                     allowlist=settings.executable_allowlist,
@@ -115,6 +117,7 @@ async def agent_loop() -> None:
                     exec_search_path=settings.command_search_path,
                     policy_mode=settings.operation_mode,
                     child_env=settings.command_environment,
+                    roots=roots,
                 )
                 hello = AgentHello(
                     agent_id=settings.agent_id,
@@ -180,6 +183,7 @@ async def agent_loop() -> None:
                                 request.request_id,
                                 request.session_id,
                                 request.argv,
+                                cwd=request.cwd,
                             )
                             await websocket.send(result.model_dump_json())
                             continue
@@ -220,6 +224,7 @@ async def agent_loop() -> None:
                                 request.request_id,
                                 request.session_id,
                                 request.argv,
+                                cwd=request.cwd,
                                 columns=request.columns,
                                 rows=request.rows,
                             )

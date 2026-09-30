@@ -538,6 +538,8 @@ async def execute(agent_id: str, body: ExecuteBody, settings: SettingsDep) -> Co
         raise HTTPException(status_code=404, detail="agent not connected")
 
     enforce_agent_policy(agent_id, body.argv, settings)
+    if body.cwd is not None:
+        require_agent_capability(connection, "command.cwd")
     request_id = uuid.uuid4().hex
     future = pending_request(connection, request_id)
     audit(
@@ -546,10 +548,11 @@ async def execute(agent_id: str, body: ExecuteBody, settings: SettingsDep) -> Co
         request_id=request_id,
         executable=Path(body.argv[0]).name,
         argc=len(body.argv),
+        cwd=body.cwd,
     )
 
     try:
-        request = CommandRequest(request_id=request_id, argv=body.argv)
+        request = CommandRequest(request_id=request_id, argv=body.argv, cwd=body.cwd)
         await connection.websocket.send_text(request.model_dump_json())
         reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
         if not isinstance(reply, CommandResult):
@@ -583,6 +586,8 @@ async def start_command_session(
     if connection is None:
         raise HTTPException(status_code=404, detail="agent not connected")
     enforce_agent_policy(agent_id, body.argv, settings)
+    if body.cwd is not None:
+        require_agent_capability(connection, "command.cwd")
     request_id = uuid.uuid4().hex
     session_id = uuid.uuid4().hex
     future = pending_request(connection, request_id)
@@ -592,12 +597,14 @@ async def start_command_session(
         session_id=session_id,
         executable=Path(body.argv[0]).name,
         argc=len(body.argv),
+        cwd=body.cwd,
     )
     try:
         request = CommandSessionStartRequest(
             request_id=request_id,
             session_id=session_id,
             argv=body.argv,
+            cwd=body.cwd,
         )
         await connection.websocket.send_text(request.model_dump_json())
         reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
@@ -766,8 +773,10 @@ async def start_pty_session(
     if connection is None:
         raise HTTPException(status_code=404, detail="agent not connected")
     require_agent_capability(connection, "command.pty")
+    if body.cwd is not None:
+        require_agent_capability(connection, "command.cwd")
     enforce_pty_policy(agent_id, body.argv, settings)
-    target = pty_approval_target(body.argv)
+    target = pty_approval_target(body.argv, body.cwd)
     try:
         grant = await approval_store().consume(
             approval_id=body.approval_id,
@@ -796,6 +805,7 @@ async def start_pty_session(
         argc=len(body.argv),
         columns=body.columns,
         rows=body.rows,
+        cwd=body.cwd,
     )
     future = pending_request(connection, request_id)
     try:
@@ -803,6 +813,7 @@ async def start_pty_session(
             request_id=request_id,
             session_id=session_id,
             argv=body.argv,
+            cwd=body.cwd,
             columns=body.columns,
             rows=body.rows,
         )

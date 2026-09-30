@@ -33,6 +33,18 @@ def resolve_allowed_path(raw_path: str, roots: list[Path]) -> Path:
     return candidate
 
 
+def resolve_allowed_directory(raw_path: str, roots: list[Path]) -> Path:
+    path = Path(raw_path).expanduser()
+    if not path.is_absolute():
+        raise PermissionError("working directory must be absolute")
+    resolved = path.resolve(strict=True)
+    if not resolved.is_dir():
+        raise PermissionError("working directory must be a directory")
+    if not any(resolved == root or resolved.is_relative_to(root) for root in roots):
+        raise PermissionError("working directory is outside configured allowed roots")
+    return resolved
+
+
 def file_sha256(path: Path) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as handle:

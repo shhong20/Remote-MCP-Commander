@@ -116,8 +116,9 @@ def validate_pty_argv(argv: list[str]) -> str | None:
     return None
 
 
-def pty_approval_target(argv: list[str]) -> str:
-    canonical = json.dumps(argv, ensure_ascii=False, separators=(",", ":"))
+def pty_approval_target(argv: list[str], cwd: str | None = None) -> str:
+    payload: object = argv if cwd is None else {"argv": argv, "cwd": cwd}
+    canonical = json.dumps(payload, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
     return f"argv-sha256:{hashlib.sha256(canonical.encode()).hexdigest()}"
 
 

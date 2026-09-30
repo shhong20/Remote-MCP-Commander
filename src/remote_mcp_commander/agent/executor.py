@@ -6,6 +6,7 @@ import os
 import signal
 from pathlib import Path
 
+from remote_mcp_commander.agent.file_ops import resolve_allowed_directory
 from remote_mcp_commander.policy import (
     TRUSTED_GENERIC_EXEC_PATH,
     resolve_generic_executable,
@@ -67,6 +68,8 @@ async def execute_argv(
     exec_search_path: str = TRUSTED_GENERIC_EXEC_PATH,
     policy_mode: str = "hardened",
     child_env: dict[str, str] | None = None,
+    cwd: str | None = None,
+    roots: list[Path] | None = None,
 ) -> CommandResult:
     executable = Path(argv[0]).name
     policy_error = validate_generic_argv(argv, mode=policy_mode)
@@ -85,6 +88,10 @@ async def execute_argv(
             rejected=True,
             error=f"executable not found in trusted path: {executable}",
         )
+    try:
+        resolved_cwd = resolve_allowed_directory(cwd, roots or []) if cwd is not None else None
+    except (OSError, PermissionError, ValueError) as exc:
+        return CommandResult(request_id=request_id, rejected=True, error=str(exc))
 
     try:
         process = await asyncio.create_subprocess_exec(
@@ -93,6 +100,7 @@ async def execute_argv(
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
             env=child_env or {"PATH": exec_search_path},
+            cwd=resolved_cwd,
             start_new_session=(os.name == "posix"),
         )
         assert process.stdout is not None
