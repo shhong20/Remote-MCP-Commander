@@ -149,6 +149,9 @@ from remote_mcp_commander.protocol import (
     ServiceStatusBody,
     ServiceStatusRequest,
     ServiceStatusResult,
+    SessionListBody,
+    SessionListRequest,
+    SessionListResult,
     SystemHealthRequest,
     SystemHealthResult,
     TreeInspectBody,
@@ -182,6 +185,7 @@ AgentReply = (
     | CommandSessionSnapshot
     | CommandSessionOutput
     | CommandSessionDiscardResult
+    | SessionListResult
     | PtySessionSnapshot
     | PtySessionOutput
     | PtySessionInputResult
@@ -606,6 +610,43 @@ async def execute(agent_id: str, body: ExecuteBody, settings: SettingsDep) -> Co
     except TimeoutError as exc:
         audit("command_timeout", agent_id=agent_id, request_id=request_id)
         raise HTTPException(status_code=504, detail="agent request timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/sessions",
+    dependencies=[Depends(require_control_token)],
+)
+async def list_runtime_sessions(
+    agent_id: str, body: SessionListBody, settings: SettingsDep
+) -> SessionListResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "command.session_list")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = SessionListRequest(request_id=request_id, **body.model_dump())
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, SessionListResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "runtime_sessions_listed",
+            agent_id=agent_id,
+            kind=body.kind,
+            include_completed=body.include_completed,
+            count=len(reply.sessions),
+            total_count=reply.total_count,
+            truncated=reply.truncated,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent session list timed out") from exc
     except ConnectionError as exc:
         raise HTTPException(status_code=503, detail="agent disconnected") from exc
     finally:
@@ -2262,6 +2303,8 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
                 reply = CommandSessionOutput.model_validate(payload)
             elif message_type == "command_session_discard_result":
                 reply = CommandSessionDiscardResult.model_validate(payload)
+            elif message_type == "session_list_result":
+                reply = SessionListResult.model_validate(payload)
             elif message_type == "pty_session_snapshot":
                 reply = PtySessionSnapshot.model_validate(payload)
             elif message_type == "pty_session_output":

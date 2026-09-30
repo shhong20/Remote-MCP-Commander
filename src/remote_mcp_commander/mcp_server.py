@@ -42,10 +42,12 @@ from remote_mcp_commander.protocol import (
     PtySessionOutput,
     PtySessionResizeResult,
     PtySessionSnapshot,
+    RuntimeSessionFilter,
     ServiceAction,
     ServiceActionResult,
     ServiceLogsResult,
     ServiceStatusResult,
+    SessionListResult,
     SystemHealthResult,
     TreeInspectResult,
     TreeMutationResult,
@@ -151,6 +153,21 @@ def build_mcp(settings: Settings) -> MCPServer:
         """Start a command session with optional cwd and Personal-mode env overrides."""
         return await GatewayClient(settings).start_command_session(
             agent_id, argv, cwd=cwd, env=env
+        )
+
+    @server.tool()
+    async def list_sessions(
+        agent_id: str,
+        kind: RuntimeSessionFilter = "all",
+        include_completed: bool = False,
+        limit: int = 100,
+    ) -> SessionListResult:
+        """List active or retained command/PTY sessions without returning output contents."""
+        return await GatewayClient(settings).list_sessions(
+            agent_id,
+            kind=kind,
+            include_completed=include_completed,
+            limit=limit,
         )
 
     @server.tool()

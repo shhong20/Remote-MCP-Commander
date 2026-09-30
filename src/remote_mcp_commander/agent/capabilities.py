@@ -71,4 +71,7 @@ def detect_capabilities(settings: Settings, roots: list[Path]) -> list[str]:
     ):
         capabilities.add("command.pty")
 
+    if {"command.session", "command.pty"}.intersection(capabilities):
+        capabilities.add("command.session_list")
+
     return sorted(capabilities)

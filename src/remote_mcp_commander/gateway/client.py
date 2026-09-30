@@ -35,9 +35,11 @@ from remote_mcp_commander.protocol import (
     PtySessionOutput,
     PtySessionResizeResult,
     PtySessionSnapshot,
+    RuntimeSessionFilter,
     ServiceActionResult,
     ServiceLogsResult,
     ServiceStatusResult,
+    SessionListResult,
     SystemHealthResult,
     TreeInspectResult,
     TreeMutationResult,
@@ -160,6 +162,25 @@ class GatewayClient:
             json_body={"argv": argv, "cwd": cwd, "env": env or {}},
         )
         return CommandSessionSnapshot.model_validate(payload)
+
+    async def list_sessions(
+        self,
+        agent_id: str,
+        *,
+        kind: RuntimeSessionFilter = "all",
+        include_completed: bool = False,
+        limit: int = 100,
+    ) -> SessionListResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/sessions",
+            json_body={
+                "kind": kind,
+                "include_completed": include_completed,
+                "limit": limit,
+            },
+        )
+        return SessionListResult.model_validate(payload)
 
     async def command_session_status(
         self,

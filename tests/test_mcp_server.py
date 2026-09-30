@@ -56,6 +56,7 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "signal_process",
         "service_action",
         "start_command",
+        "list_sessions",
         "command_status",
         "cancel_command",
         "command_output",
@@ -141,6 +142,11 @@ async def test_command_session_tools_use_structured_contracts() -> None:
     start_schema = tools["start_command"].input_schema
     assert start_schema["properties"]["argv"]["type"] == "array"
     assert set(start_schema["required"]) == {"agent_id", "argv"}
+    list_schema = tools["list_sessions"].input_schema
+    assert set(list_schema["required"]) == {"agent_id"}
+    assert list_schema["properties"]["kind"]["default"] == "all"
+    assert list_schema["properties"]["include_completed"]["default"] is False
+    assert list_schema["properties"]["limit"]["default"] == 100
     assert set(tools["command_status"].input_schema["required"]) == {
         "agent_id",
         "session_id",

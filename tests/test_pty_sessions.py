@@ -181,3 +181,28 @@ async def test_hardened_pty_rejects_env_override(tmp_path: Path) -> None:
     )
     assert result.rejected is True
     assert "Personal mode" in (result.error or "")
+
+
+@pytest.mark.asyncio
+async def test_pty_session_listing_filters_running_and_completed(tmp_path: Path) -> None:
+    make_fake_terminal(tmp_path, "print('done', flush=True)\n")
+    manager = make_manager(exec_search_path=str(tmp_path))
+    completed_id = "3" * 32
+    await manager.start("done", completed_id, ["terminal"], columns=80, rows=24)
+    await wait_terminal(manager, completed_id)
+
+    make_fake_terminal(tmp_path, "import time\ntime.sleep(30)\n")
+    running_id = "4" * 32
+    await manager.start("running", running_id, ["terminal"], columns=80, rows=24)
+
+    active = await manager.list_infos(include_completed=False)
+    assert [item.session_id for item in active] == [running_id]
+    assert active[0].kind == "pty"
+    assert active[0].state == "running"
+
+    all_infos = await manager.list_infos(include_completed=True)
+    by_id = {item.session_id: item for item in all_infos}
+    assert set(by_id) == {completed_id, running_id}
+    assert by_id[completed_id].state == "completed"
+    assert by_id[completed_id].output_chars >= len("done")
+    await manager.cancel_all()

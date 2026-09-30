@@ -814,6 +814,45 @@ class AuditVerificationResult(BaseModel):
 
 
 CommandSessionState = Literal["running", "completed", "cancelled", "timed_out", "failed"]
+RuntimeSessionKind = Literal["command", "pty"]
+RuntimeSessionFilter = Literal["all", "command", "pty"]
+
+
+class RuntimeSessionInfo(BaseModel):
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    kind: RuntimeSessionKind
+    executable: str = ""
+    state: CommandSessionState
+    cwd: str | None = None
+    started_at: datetime | None = None
+    finished_at: datetime | None = None
+    returncode: int | None = None
+    output_chars: int = 0
+    output_truncated: bool = False
+
+
+class SessionListRequest(BaseModel):
+    type: Literal["session_list_request"] = "session_list_request"
+    request_id: str
+    kind: RuntimeSessionFilter = "all"
+    include_completed: bool = False
+    limit: int = Field(default=100, ge=1, le=200)
+
+
+class SessionListResult(BaseModel):
+    type: Literal["session_list_result"] = "session_list_result"
+    request_id: str
+    sessions: list[RuntimeSessionInfo] = Field(default_factory=list)
+    total_count: int = 0
+    truncated: bool = False
+    rejected: bool = False
+    error: str | None = None
+
+
+class SessionListBody(BaseModel):
+    kind: RuntimeSessionFilter = "all"
+    include_completed: bool = False
+    limit: int = Field(default=100, ge=1, le=200)
 
 
 class CommandSessionStartRequest(BaseModel):

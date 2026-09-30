@@ -78,6 +78,8 @@ from remote_mcp_commander.protocol import (
     ServiceActionRequest,
     ServiceLogsRequest,
     ServiceStatusRequest,
+    SessionListRequest,
+    SessionListResult,
     SystemHealthRequest,
     TreeInspectRequest,
     TreeMutationRequest,
@@ -195,6 +197,37 @@ async def agent_loop() -> None:
                                 roots=roots,
                                 timeout_s=settings.exec_timeout_s,
                                 max_output_bytes=settings.max_output_bytes,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "session_list_request":
+                            request = SessionListRequest.model_validate(payload)
+                            infos = []
+                            if request.kind in {"all", "command"}:
+                                infos.extend(
+                                    await sessions.list_infos(
+                                        include_completed=request.include_completed
+                                    )
+                                )
+                            if request.kind in {"all", "pty"}:
+                                infos.extend(
+                                    await pty_sessions.list_infos(
+                                        include_completed=request.include_completed
+                                    )
+                                )
+                            infos.sort(
+                                key=lambda info: (
+                                    info.started_at.timestamp() if info.started_at else 0.0
+                                ),
+                                reverse=True,
+                            )
+                            total_count = len(infos)
+                            result = SessionListResult(
+                                request_id=request.request_id,
+                                sessions=infos[: request.limit],
+                                total_count=total_count,
+                                truncated=total_count > request.limit,
                             )
                             await websocket.send(result.model_dump_json())
                             continue
