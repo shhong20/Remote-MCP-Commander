@@ -78,6 +78,9 @@ from remote_mcp_commander.protocol import (
     FileReadResult,
     FileRootListRequest,
     FileRootListResult,
+    FileSearchBody,
+    FileSearchRequest,
+    FileSearchResult,
     FileWriteBody,
     FileWriteRequest,
     FileWriteResult,
@@ -85,6 +88,9 @@ from remote_mcp_commander.protocol import (
     GitStatusRequest,
     GitStatusResult,
     Heartbeat,
+    PathMutationBody,
+    PathMutationRequest,
+    PathMutationResult,
     PingRequest,
     PingResponse,
     PingResult,
@@ -137,6 +143,8 @@ AgentReply = (
     | DirectoryListResult
     | FileInfoResult
     | FileWriteResult
+    | FileSearchResult
+    | PathMutationResult
     | ProcessListResult
     | ServiceStatusResult
     | ProcessTerminateResult
@@ -1345,6 +1353,130 @@ async def write_file(agent_id: str, body: FileWriteBody, settings: SettingsDep) 
 
 
 @app.post(
+    "/api/v1/agents/{agent_id}/files/search",
+    dependencies=[Depends(require_control_token)],
+)
+async def search_agent_files(
+    agent_id: str, body: FileSearchBody, settings: SettingsDep
+) -> FileSearchResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "filesystem.search")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = FileSearchRequest(request_id=request_id, **body.model_dump())
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, FileSearchResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "file_search",
+            agent_id=agent_id,
+            root=body.root,
+            mode=body.mode,
+            result_count=len(reply.matches),
+            truncated=reply.truncated,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent file search timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+async def _mutate_agent_path(
+    agent_id: str,
+    operation: str,
+    body: PathMutationBody,
+    settings: Settings,
+) -> PathMutationResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "filesystem.mutate")
+    audit_required(
+        "path_mutation_requested",
+        agent_id=agent_id,
+        operation=operation,
+        path=body.path,
+        destination=body.destination,
+        overwrite=body.overwrite,
+    )
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = PathMutationRequest(
+            request_id=request_id,
+            operation=operation,
+            **body.model_dump(),
+        )
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, PathMutationResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "path_mutation",
+            agent_id=agent_id,
+            operation=operation,
+            path=body.path,
+            destination=body.destination,
+            changed=reply.changed,
+            rejected=reply.rejected,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent path mutation timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/files/mkdir",
+    dependencies=[Depends(require_control_token)],
+)
+async def create_agent_directory(
+    agent_id: str, body: PathMutationBody, settings: SettingsDep
+) -> PathMutationResult:
+    return await _mutate_agent_path(agent_id, "mkdir", body, settings)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/files/copy",
+    dependencies=[Depends(require_control_token)],
+)
+async def copy_agent_path(
+    agent_id: str, body: PathMutationBody, settings: SettingsDep
+) -> PathMutationResult:
+    return await _mutate_agent_path(agent_id, "copy", body, settings)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/files/move",
+    dependencies=[Depends(require_control_token)],
+)
+async def move_agent_path(
+    agent_id: str, body: PathMutationBody, settings: SettingsDep
+) -> PathMutationResult:
+    return await _mutate_agent_path(agent_id, "move", body, settings)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/files/delete",
+    dependencies=[Depends(require_control_token)],
+)
+async def delete_agent_path(
+    agent_id: str, body: PathMutationBody, settings: SettingsDep
+) -> PathMutationResult:
+    return await _mutate_agent_path(agent_id, "delete", body, settings)
+
+
+@app.post(
     "/api/v1/agents/{agent_id}/processes",
     dependencies=[Depends(require_control_token)],
 )
@@ -1660,6 +1792,10 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
                 reply = FileReadResult.model_validate(payload)
             elif message_type == "file_write_result":
                 reply = FileWriteResult.model_validate(payload)
+            elif message_type == "file_search_result":
+                reply = FileSearchResult.model_validate(payload)
+            elif message_type == "path_mutation_result":
+                reply = PathMutationResult.model_validate(payload)
             elif message_type == "process_list_result":
                 reply = ProcessListResult.model_validate(payload)
             elif message_type == "service_status_result":

@@ -37,10 +37,13 @@ def detect_capabilities(settings: Settings, roots: list[Path]) -> list[str]:
         capabilities.update(
             {
                 "filesystem.discovery",
+                "filesystem.search",
                 "file.read",
                 "file.write",
             }
         )
+        if settings.operation_mode == "personal":
+            capabilities.add("filesystem.mutate")
         if shutil.which("git", path=TRUSTED_GIT_PATH) is not None:
             capabilities.add("git.status")
 

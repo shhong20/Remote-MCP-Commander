@@ -28,3 +28,4 @@ COMMANDER_ALLOWED_ROOTS_JSON=[]
 ```
 
 With the empty root list above, the effective root becomes the Agent user's home directory.
+Structured `search_files`, `create_directory`, `copy_file`, `move_path`, and non-recursive `delete_path` tools are available in v0.29; see `personal-filesystem-tools.md`.

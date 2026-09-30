@@ -75,9 +75,7 @@ def _sanitize(value: Any, *, depth: int = 0) -> Any:
                 result["<truncated>"] = True
                 break
             key = str(raw_key)[:128]
-            result[key] = "<redacted>" if _sensitive_key(key) else _sanitize(
-                item, depth=depth + 1
-            )
+            result[key] = "<redacted>" if _sensitive_key(key) else _sanitize(item, depth=depth + 1)
         return result
     if isinstance(value, (list, tuple, set)):
         items = list(value)[:_MAX_COLLECTION_ITEMS]
@@ -282,8 +280,7 @@ class AuditJournal:
                                     anchor_hash=anchor_hash,
                                     head_hash=head_hash,
                                     error=(
-                                        "legacy record follows chain in "
-                                        f"{path.name}:{line_number}"
+                                        f"legacy record follows chain in {path.name}:{line_number}"
                                     ),
                                 )
                             legacy += 1
@@ -305,9 +302,7 @@ class AuditJournal:
                         if (
                             not isinstance(record_chain_id, str)
                             or len(record_chain_id) != 32
-                            or not all(
-                                character in _HASH_PATTERN for character in record_chain_id
-                            )
+                            or not all(character in _HASH_PATTERN for character in record_chain_id)
                             or not _valid_hash(previous_hash)
                             or not _valid_hash(digest)
                             or not isinstance(sequence, int)
@@ -408,10 +403,7 @@ class AuditJournal:
                 result.valid
                 and self._initialized
                 and self._sequence
-                and (
-                    result.last_sequence != self._sequence
-                    or result.head_hash != self._last_hash
-                )
+                and (result.last_sequence != self._sequence or result.head_hash != self._last_hash)
             ):
                 return result.model_copy(
                     update={
@@ -490,9 +482,7 @@ class AuditJournal:
                 ) as response:
                     response.raise_for_status()
         except httpx.HTTPError as exc:
-            raise AuditDeliveryError(
-                f"remote audit delivery failed: {type(exc).__name__}"
-            ) from exc
+            raise AuditDeliveryError(f"remote audit delivery failed: {type(exc).__name__}") from exc
 
     def append(self, payload: dict[str, Any]) -> None:
         self.initialize()
@@ -505,9 +495,7 @@ class AuditJournal:
             }
             record["audit_hash"] = _record_hash(record)
             encoded = (json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n").encode()
-            current_size = (
-                self._require_regular_path(self.path) if self._lexists(self.path) else 0
-            )
+            current_size = self._require_regular_path(self.path) if self._lexists(self.path) else 0
             if current_size > 0 and current_size + len(encoded) > self.max_bytes:
                 self._rotate_locked()
             try:

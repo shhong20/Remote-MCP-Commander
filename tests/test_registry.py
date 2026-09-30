@@ -40,4 +40,3 @@ async def test_registry_persists_and_revocation_blocks_token(tmp_path) -> None:
     record = await second.get("server-02")
     assert record is not None
     assert record.revoked_at is not None
-

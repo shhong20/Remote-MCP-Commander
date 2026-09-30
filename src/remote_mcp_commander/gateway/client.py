@@ -16,8 +16,10 @@ from remote_mcp_commander.protocol import (
     FileInfoResult,
     FileReadResult,
     FileRootListResult,
+    FileSearchResult,
     FileWriteResult,
     GitStatusResult,
+    PathMutationResult,
     PingResponse,
     PortLookupResult,
     ProcessListResult,
@@ -217,12 +219,8 @@ class GatewayClient:
         )
         return PtySessionSnapshot.model_validate(payload)
 
-    async def pty_session_status(
-        self, agent_id: str, session_id: str
-    ) -> PtySessionSnapshot:
-        payload = await self._request(
-            "GET", f"/api/v1/agents/{agent_id}/pty/sessions/{session_id}"
-        )
+    async def pty_session_status(self, agent_id: str, session_id: str) -> PtySessionSnapshot:
+        payload = await self._request("GET", f"/api/v1/agents/{agent_id}/pty/sessions/{session_id}")
         return PtySessionSnapshot.model_validate(payload)
 
     async def write_pty_input(
@@ -260,17 +258,13 @@ class GatewayClient:
         )
         return PtySessionOutput.model_validate(payload)
 
-    async def cancel_pty_session(
-        self, agent_id: str, session_id: str
-    ) -> PtySessionSnapshot:
+    async def cancel_pty_session(self, agent_id: str, session_id: str) -> PtySessionSnapshot:
         payload = await self._request(
             "POST", f"/api/v1/agents/{agent_id}/pty/sessions/{session_id}/cancel"
         )
         return PtySessionSnapshot.model_validate(payload)
 
-    async def discard_pty_session(
-        self, agent_id: str, session_id: str
-    ) -> PtySessionDiscardResult:
+    async def discard_pty_session(self, agent_id: str, session_id: str) -> PtySessionDiscardResult:
         payload = await self._request(
             "POST", f"/api/v1/agents/{agent_id}/pty/sessions/{session_id}/discard"
         )
@@ -340,6 +334,53 @@ class GatewayClient:
             },
         )
         return FileWriteResult.model_validate(payload)
+
+    async def search_files(
+        self,
+        agent_id: str,
+        root: str,
+        query: str,
+        *,
+        mode: str = "files",
+        file_glob: str | None = None,
+        case_sensitive: bool = False,
+        max_results: int = 100,
+    ) -> FileSearchResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/files/search",
+            json_body={
+                "root": root,
+                "query": query,
+                "mode": mode,
+                "file_glob": file_glob,
+                "case_sensitive": case_sensitive,
+                "max_results": max_results,
+            },
+        )
+        return FileSearchResult.model_validate(payload)
+
+    async def mutate_path(
+        self,
+        agent_id: str,
+        operation: str,
+        path: str,
+        *,
+        destination: str | None = None,
+        parents: bool = False,
+        overwrite: bool = False,
+    ) -> PathMutationResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/files/{operation}",
+            json_body={
+                "path": path,
+                "destination": destination,
+                "parents": parents,
+                "overwrite": overwrite,
+            },
+        )
+        return PathMutationResult.model_validate(payload)
 
     async def list_processes(self, agent_id: str, *, limit: int = 100) -> ProcessListResult:
         payload = await self._request(
