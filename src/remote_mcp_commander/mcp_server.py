@@ -20,6 +20,7 @@ from remote_mcp_commander.protocol import (
     CommandSessionSnapshot,
     DirectoryListResult,
     DirectoryTreeResult,
+    FileAppendResult,
     FileEditResult,
     FileInfoResult,
     FileReadManyResult,
@@ -336,6 +337,18 @@ def build_mcp(settings: Settings) -> MCPServer:
             content,
             overwrite=overwrite,
             expected_sha256=expected_sha256,
+        )
+
+    @server.tool()
+    async def append_file(
+        agent_id: str,
+        path: str,
+        content: str,
+        expected_sha256: str | None = None,
+    ) -> FileAppendResult:
+        """Append bounded UTF-8 text to an existing file inside allowed roots."""
+        return await GatewayClient(settings).append_file(
+            agent_id, path, content, expected_sha256=expected_sha256
         )
 
     @server.tool()

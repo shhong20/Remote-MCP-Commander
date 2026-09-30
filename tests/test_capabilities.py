@@ -60,6 +60,7 @@ def test_capabilities_reflect_available_tools_and_allowed_roots(
         "file.read",
         "file.read_many",
         "file.write",
+        "file.append",
         "file.edit",
         "command.cwd",
         "git.status",

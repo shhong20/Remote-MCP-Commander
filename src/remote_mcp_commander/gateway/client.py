@@ -14,6 +14,7 @@ from remote_mcp_commander.protocol import (
     CommandSessionSnapshot,
     DirectoryListResult,
     DirectoryTreeResult,
+    FileAppendResult,
     FileEditResult,
     FileInfoResult,
     FileReadManyResult,
@@ -417,6 +418,24 @@ class GatewayClient:
             },
         )
         return FileWriteResult.model_validate(payload)
+
+    async def append_file(
+        self,
+        agent_id: str,
+        path: str,
+        content: str,
+        *,
+        expected_sha256: str | None = None,
+    ) -> FileAppendResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/files/append",
+            json_body={
+                "path": path, "content": content,
+                "expected_sha256": expected_sha256,
+            },
+        )
+        return FileAppendResult.model_validate(payload)
 
     async def edit_file(
         self,

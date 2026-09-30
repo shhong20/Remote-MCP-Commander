@@ -209,6 +209,31 @@ class FileWriteResult(BaseModel):
     error: str | None = None
 
 
+class FileAppendRequest(BaseModel):
+    type: Literal["file_append_request"] = "file_append_request"
+    request_id: str
+    path: str = Field(min_length=1, max_length=4096)
+    content: str = Field(min_length=1, max_length=1_048_576)
+    expected_sha256: str | None = Field(default=None, min_length=64, max_length=64)
+
+
+class FileAppendResult(BaseModel):
+    type: Literal["file_append_result"] = "file_append_result"
+    request_id: str
+    path: str = ""
+    bytes_appended: int = 0
+    size: int = 0
+    sha256: str | None = None
+    rejected: bool = False
+    error: str | None = None
+
+
+class FileAppendBody(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+    content: str = Field(min_length=1, max_length=1_048_576)
+    expected_sha256: str | None = Field(default=None, min_length=64, max_length=64)
+
+
 class FileEditRequest(BaseModel):
     type: Literal["file_edit_request"] = "file_edit_request"
     request_id: str

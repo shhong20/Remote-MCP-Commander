@@ -8,6 +8,7 @@ import tempfile
 from pathlib import Path
 
 from remote_mcp_commander.protocol import (
+    FileAppendResult,
     FileReadManyItem,
     FileReadManyResult,
     FileReadResult,
@@ -189,6 +190,65 @@ def _write_text_file_sync(
         )
     except (OSError, PermissionError, ValueError) as exc:
         return FileWriteResult(request_id=request_id, rejected=True, error=str(exc))
+
+
+def _append_text_file_sync(
+    request_id: str,
+    raw_path: str,
+    content: str,
+    *,
+    roots: list[Path],
+    expected_sha256: str | None,
+    max_file_bytes: int,
+) -> FileAppendResult:
+    encoded = content.encode("utf-8")
+    try:
+        path = resolve_allowed_path(raw_path, roots).resolve(strict=True)
+        if not path.is_file():
+            raise PermissionError("target is not a regular file")
+        flags = os.O_RDWR | os.O_APPEND
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        fd = os.open(path, flags)
+        try:
+            if os.name == "posix":
+                import fcntl
+
+                fcntl.flock(fd, fcntl.LOCK_EX)
+            info = os.fstat(fd)
+            if info.st_size + len(encoded) > max_file_bytes:
+                raise ValueError("appended file would exceed size limit")
+            os.lseek(fd, 0, os.SEEK_SET)
+            current = os.read(fd, info.st_size)
+            if b"\x00" in current:
+                raise ValueError("binary files are not supported")
+            current.decode("utf-8")
+            current_hash = hashlib.sha256(current).hexdigest()
+            if expected_sha256 is not None and not secrets_match(
+                current_hash, expected_sha256
+            ):
+                raise ValueError("file changed since read")
+            os.write(fd, encoded)
+            os.fsync(fd)
+        finally:
+            os.close(fd)
+        final_hash = file_sha256(path)
+        return FileAppendResult(
+            request_id=request_id, path=str(path), bytes_appended=len(encoded),
+            size=path.stat().st_size, sha256=final_hash,
+        )
+    except (OSError, PermissionError, UnicodeDecodeError, ValueError) as exc:
+        return FileAppendResult(request_id=request_id, rejected=True, error=str(exc))
+
+
+async def append_text_file(
+    request_id: str, raw_path: str, content: str, *, roots: list[Path],
+    expected_sha256: str | None, max_file_bytes: int,
+) -> FileAppendResult:
+    return await asyncio.to_thread(
+        _append_text_file_sync, request_id, raw_path, content, roots=roots,
+        expected_sha256=expected_sha256, max_file_bytes=max_file_bytes,
+    )
 
 
 def _read_many_text_files_sync(

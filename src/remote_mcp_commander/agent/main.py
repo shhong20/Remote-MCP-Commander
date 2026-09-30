@@ -13,6 +13,7 @@ from remote_mcp_commander.agent.diagnostics import lookup_port, service_logs, sy
 from remote_mcp_commander.agent.edit_ops import edit_text_file
 from remote_mcp_commander.agent.file_ops import (
     allowed_roots,
+    append_text_file,
     read_many_text_files,
     read_text_file,
     write_text_file,
@@ -54,6 +55,7 @@ from remote_mcp_commander.protocol import (
     CommandSessionStatusRequest,
     DirectoryListRequest,
     DirectoryTreeRequest,
+    FileAppendRequest,
     FileEditRequest,
     FileInfoRequest,
     FileReadManyRequest,
@@ -423,6 +425,16 @@ async def agent_loop() -> None:
                                 request.content,
                                 roots=roots,
                                 overwrite=request.overwrite,
+                                expected_sha256=request.expected_sha256,
+                                max_file_bytes=settings.file_max_bytes,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "file_append_request":
+                            request = FileAppendRequest.model_validate(payload)
+                            result = await append_text_file(
+                                request.request_id, request.path, request.content, roots=roots,
                                 expected_sha256=request.expected_sha256,
                                 max_file_bytes=settings.file_max_bytes,
                             )
