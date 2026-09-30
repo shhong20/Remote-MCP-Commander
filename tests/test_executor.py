@@ -42,6 +42,7 @@ async def test_truncates_output() -> None:
     )
     assert result.returncode == 0
     assert len(result.stdout.encode()) <= 10
+    assert result.stdout_truncated is True
 
 
 @pytest.mark.asyncio
@@ -102,3 +103,18 @@ async def test_generic_execute_uses_explicit_trusted_search_path(tmp_path) -> No
     )
     assert result.returncode == 0
     assert result.stdout.strip() == "trusted-test"
+
+
+@pytest.mark.asyncio
+async def test_personal_execute_timeout_returns_after_process_group_termination() -> None:
+    result = await execute_argv(
+        "req-timeout",
+        ["bash", "-lc", "sleep 30 & wait"],
+        allowlist={"bash"},
+        timeout_s=0.1,
+        max_output_bytes=1024,
+        policy_mode="personal",
+    )
+    assert result.timed_out is True
+    assert result.returncode is not None
+    assert result.error == "execution timed out"
