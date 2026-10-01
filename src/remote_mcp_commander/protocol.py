@@ -220,6 +220,34 @@ class FileLineReadBody(BaseModel):
     max_lines: int = Field(default=200, ge=1, le=1000)
 
 
+class FileTailRequest(BaseModel):
+    type: Literal["file_tail_request"] = "file_tail_request"
+    request_id: str
+    path: str = Field(min_length=1, max_length=4096)
+    lines: int = Field(default=100, ge=1, le=1000)
+    max_bytes: int = Field(default=262_144, ge=4096, le=1_048_576)
+
+
+class FileTailResult(BaseModel):
+    type: Literal["file_tail_result"] = "file_tail_result"
+    request_id: str
+    path: str = ""
+    content: str = ""
+    size: int = 0
+    lines_requested: int = 0
+    lines_returned: int = 0
+    scanned_bytes: int = 0
+    truncated: bool = False
+    rejected: bool = False
+    error: str | None = None
+
+
+class FileTailBody(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+    lines: int = Field(default=100, ge=1, le=1000)
+    max_bytes: int = Field(default=262_144, ge=4096, le=1_048_576)
+
+
 class FileWriteRequest(BaseModel):
     type: Literal["file_write_request"] = "file_write_request"
     request_id: str

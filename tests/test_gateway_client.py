@@ -966,3 +966,31 @@ async def test_pty_output_lines_client_sends_line_cursor_payload() -> None:
     assert seen[0].url.path.endswith(f"/pty/sessions/{session_id}/output/lines")
     assert b'"offset":-2' in seen[0].content
     assert b'"max_lines":9' in seen[0].content
+
+
+@pytest.mark.asyncio
+async def test_tail_file_client_sends_bounded_payload() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "tail",
+                "path": "/srv/app.log",
+                "content": "last\n",
+                "lines_requested": 5,
+                "lines_returned": 1,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    result = await client.tail_file(
+        "server-01", "/srv/app.log", lines=5, max_bytes=8192
+    )
+
+    assert result.content == "last\n"
+    assert seen[0].url.path.endswith("/files/tail")
+    assert b'"lines":5' in seen[0].content
+    assert b'"max_bytes":8192' in seen[0].content

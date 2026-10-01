@@ -17,6 +17,7 @@ from remote_mcp_commander.agent.file_ops import (
     read_many_text_files,
     read_text_file,
     read_text_lines,
+    tail_text_file,
     write_text_file,
 )
 from remote_mcp_commander.agent.filesystem_ops import (
@@ -71,6 +72,7 @@ from remote_mcp_commander.protocol import (
     FileSearchSessionMoreRequest,
     FileSearchSessionStartRequest,
     FileSearchSessionStopRequest,
+    FileTailRequest,
     FileWriteRequest,
     GitStatusRequest,
     Heartbeat,
@@ -457,6 +459,15 @@ async def agent_loop() -> None:
                                 request.request_id, request.path, roots=roots,
                                 offset=request.offset, max_lines=request.max_lines,
                                 max_file_bytes=settings.file_max_bytes,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "file_tail_request":
+                            request = FileTailRequest.model_validate(payload)
+                            result = await tail_text_file(
+                                request.request_id, request.path, roots=roots,
+                                lines=request.lines, max_bytes=request.max_bytes,
                             )
                             await websocket.send(result.model_dump_json())
                             continue

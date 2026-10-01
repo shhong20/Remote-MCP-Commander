@@ -37,6 +37,7 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "file_info",
         "read_file",
         "read_file_lines",
+        "tail_file",
         "read_files",
         "write_file",
         "append_file",
@@ -153,6 +154,10 @@ async def test_command_session_tools_use_structured_contracts() -> None:
     assert set(start_schema["required"]) == {"agent_id", "argv"}
     assert "timeout_s" in start_schema["properties"]
     assert "timeout_s" not in start_schema["required"]
+    tail_schema = tools["tail_file"].input_schema
+    assert tail_schema["properties"]["lines"]["default"] == 100
+    assert tail_schema["properties"]["max_bytes"]["default"] == 262144
+
     tree_schema = tools["list_directory_tree"].input_schema
     assert tree_schema["properties"]["depth"]["default"] == 2
     assert tree_schema["properties"]["include_hidden"]["default"] is False
