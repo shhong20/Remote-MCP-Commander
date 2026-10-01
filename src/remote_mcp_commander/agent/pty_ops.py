@@ -13,11 +13,13 @@ from pathlib import Path
 
 from remote_mcp_commander.agent.env_policy import merge_command_env
 from remote_mcp_commander.agent.file_ops import resolve_allowed_directory
+from remote_mcp_commander.agent.output_lines import paginate_lines
 from remote_mcp_commander.policy import TRUSTED_GENERIC_EXEC_PATH, validate_pty_argv
 from remote_mcp_commander.protocol import (
     CommandSessionState,
     PtySessionDiscardResult,
     PtySessionInputResult,
+    PtySessionLineOutput,
     PtySessionOutput,
     PtySessionResizeResult,
     PtySessionSnapshot,
@@ -383,6 +385,38 @@ class PtySessionManager:
             state=session.state,
             output=output,
             next_offset=offset + len(output),
+            output_truncated=session.output_truncated,
+            error=session.error,
+        )
+
+    async def output_lines(
+        self, request_id: str, session_id: str, *, offset: int, max_lines: int
+    ) -> PtySessionLineOutput:
+        session = self._sessions.get(session_id)
+        if session is None:
+            return PtySessionLineOutput(
+                request_id=request_id,
+                session_id=session_id,
+                state="failed",
+                rejected=True,
+                error="PTY session not found",
+            )
+        page = paginate_lines(
+            session.output,
+            running=session.state == "running",
+            offset=offset,
+            max_lines=max_lines,
+        )
+        return PtySessionLineOutput(
+            request_id=request_id,
+            session_id=session_id,
+            state=session.state,
+            content=page.content,
+            total_lines=page.total_lines,
+            start_line=page.start_line,
+            next_line=page.next_line,
+            eof=page.eof,
+            pending_partial=page.pending_partial,
             output_truncated=session.output_truncated,
             error=session.error,
         )

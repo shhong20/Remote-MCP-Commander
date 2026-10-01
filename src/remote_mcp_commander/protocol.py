@@ -1159,6 +1159,14 @@ class PtySessionOutputRequest(BaseModel):
     max_chars: int = Field(default=8192, ge=1, le=65_536)
 
 
+class PtySessionLineOutputRequest(BaseModel):
+    type: Literal["pty_session_line_output_request"] = "pty_session_line_output_request"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    offset: int = Field(default=0, ge=-1000)
+    max_lines: int = Field(default=200, ge=1, le=1000)
+
+
 class PtySessionDiscardRequest(BaseModel):
     type: Literal["pty_session_discard_request"] = "pty_session_discard_request"
     request_id: str
@@ -1190,6 +1198,22 @@ class PtySessionOutput(BaseModel):
     state: CommandSessionState
     output: str = ""
     next_offset: int = 0
+    output_truncated: bool = False
+    rejected: bool = False
+    error: str | None = None
+
+
+class PtySessionLineOutput(BaseModel):
+    type: Literal["pty_session_line_output"] = "pty_session_line_output"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    state: CommandSessionState
+    content: str = ""
+    total_lines: int = 0
+    start_line: int = 0
+    next_line: int = 0
+    eof: bool = False
+    pending_partial: bool = False
     output_truncated: bool = False
     rejected: bool = False
     error: str | None = None
@@ -1245,3 +1269,8 @@ class PtySessionResizeBody(BaseModel):
 class PtySessionOutputBody(BaseModel):
     offset: int = Field(default=0, ge=0)
     max_chars: int = Field(default=8192, ge=1, le=65_536)
+
+
+class PtySessionLineOutputBody(BaseModel):
+    offset: int = Field(default=0, ge=-1000)
+    max_lines: int = Field(default=200, ge=1, le=1000)

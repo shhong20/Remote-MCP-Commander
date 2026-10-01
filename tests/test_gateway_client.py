@@ -935,3 +935,34 @@ async def test_command_output_lines_client_sends_line_cursor_payload() -> None:
     assert b'"stream":"stderr"' in seen[0].content
     assert b'"offset":-2' in seen[0].content
     assert b'"max_lines":10' in seen[0].content
+
+
+@pytest.mark.asyncio
+async def test_pty_output_lines_client_sends_line_cursor_payload() -> None:
+    seen: list[httpx.Request] = []
+    session_id = "bc" * 16
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "pty-lines",
+                "session_id": session_id,
+                "state": "completed",
+                "content": "two\nthree\n",
+                "total_lines": 3,
+                "start_line": 1,
+                "next_line": 3,
+                "eof": True,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    result = await client.pty_session_output_lines(
+        "server-01", session_id, offset=-2, max_lines=9
+    )
+    assert result.content == "two\nthree\n"
+    assert seen[0].url.path.endswith(f"/pty/sessions/{session_id}/output/lines")
+    assert b'"offset":-2' in seen[0].content
+    assert b'"max_lines":9' in seen[0].content

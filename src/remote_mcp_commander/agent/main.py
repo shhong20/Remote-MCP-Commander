@@ -84,6 +84,7 @@ from remote_mcp_commander.protocol import (
     PtySessionCancelRequest,
     PtySessionDiscardRequest,
     PtySessionInputRequest,
+    PtySessionLineOutputRequest,
     PtySessionOutputRequest,
     PtySessionResizeRequest,
     PtySessionStartRequest,
@@ -373,6 +374,17 @@ async def agent_loop() -> None:
                                 request.session_id,
                                 offset=request.offset,
                                 max_chars=request.max_chars,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "pty_session_line_output_request":
+                            request = PtySessionLineOutputRequest.model_validate(payload)
+                            result = await pty_sessions.output_lines(
+                                request.request_id,
+                                request.session_id,
+                                offset=request.offset,
+                                max_lines=request.max_lines,
                             )
                             await websocket.send(result.model_dump_json())
                             continue

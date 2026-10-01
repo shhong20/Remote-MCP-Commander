@@ -38,6 +38,7 @@ from remote_mcp_commander.protocol import (
     ProcessTerminateResult,
     PtySessionDiscardResult,
     PtySessionInputResult,
+    PtySessionLineOutput,
     PtySessionOutput,
     PtySessionResizeResult,
     PtySessionSnapshot,
@@ -352,6 +353,21 @@ class GatewayClient:
             json_body={"offset": offset, "max_chars": max_chars},
         )
         return PtySessionOutput.model_validate(payload)
+
+    async def pty_session_output_lines(
+        self,
+        agent_id: str,
+        session_id: str,
+        *,
+        offset: int = 0,
+        max_lines: int = 200,
+    ) -> PtySessionLineOutput:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/pty/sessions/{session_id}/output/lines",
+            json_body={"offset": offset, "max_lines": max_lines},
+        )
+        return PtySessionLineOutput.model_validate(payload)
 
     async def cancel_pty_session(self, agent_id: str, session_id: str) -> PtySessionSnapshot:
         payload = await self._request(

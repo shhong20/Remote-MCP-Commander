@@ -72,6 +72,7 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "write_pty",
         "resize_pty",
         "pty_output",
+        "pty_output_lines",
         "cancel_pty",
         "discard_pty",
     }
@@ -214,6 +215,10 @@ async def test_pty_tools_use_structured_contracts() -> None:
         "data",
     }
     assert tools["pty_output"].input_schema["properties"]["offset"]["default"] == 0
+    line_schema = tools["pty_output_lines"].input_schema
+    assert set(line_schema["required"]) == {"agent_id", "session_id"}
+    assert line_schema["properties"]["offset"]["default"] == 0
+    assert line_schema["properties"]["max_lines"]["default"] == 200
 
 
 @pytest.mark.asyncio

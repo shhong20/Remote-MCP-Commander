@@ -206,3 +206,47 @@ async def test_pty_session_listing_filters_running_and_completed(tmp_path: Path)
     assert by_id[completed_id].state == "completed"
     assert by_id[completed_id].output_chars >= len("done")
     await manager.cancel_all()
+
+
+@pytest.mark.asyncio
+async def test_pty_output_lines_supports_range_and_tail(tmp_path: Path) -> None:
+    make_fake_terminal(
+        tmp_path,
+        "import sys\nsys.stdout.write('a\\nb\\nc')\nsys.stdout.flush()\n",
+    )
+    manager = make_manager(exec_search_path=str(tmp_path))
+    session_id = "5" * 32
+    await manager.start("start", session_id, ["terminal"], columns=80, rows=24)
+    terminal = await wait_terminal(manager, session_id)
+    assert terminal.state == "completed"
+
+    middle = await manager.output_lines("mid", session_id, offset=1, max_lines=1)
+    assert middle.content.replace("\r", "") == "b\n"
+    assert middle.total_lines == 3
+    assert middle.eof is False
+
+    tail = await manager.output_lines("tail", session_id, offset=-2, max_lines=1)
+    assert tail.content.replace("\r", "") == "b\nc"
+    assert tail.eof is True
+
+
+@pytest.mark.asyncio
+async def test_running_pty_output_lines_hides_partial_last_line(tmp_path: Path) -> None:
+    make_fake_terminal(
+        tmp_path,
+        "import sys,time\n"
+        "sys.stdout.write('ready\\npartial\\r')\n"
+        "sys.stdout.flush()\n"
+        "time.sleep(30)\n",
+    )
+    manager = make_manager(timeout_s=60.0, exec_search_path=str(tmp_path))
+    session_id = "6" * 32
+    await manager.start("start", session_id, ["terminal"], columns=80, rows=24)
+    await wait_for_output(manager, session_id, "partial")
+
+    page = await manager.output_lines("page", session_id, offset=0, max_lines=10)
+    assert page.content.replace("\r", "") == "ready\n"
+    assert page.total_lines == 1
+    assert page.pending_partial is True
+    assert page.eof is False
+    await manager.cancel("cancel", session_id)

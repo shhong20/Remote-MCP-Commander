@@ -10,6 +10,7 @@ from pathlib import Path
 
 from remote_mcp_commander.agent.env_policy import merge_command_env
 from remote_mcp_commander.agent.file_ops import resolve_allowed_directory
+from remote_mcp_commander.agent.output_lines import paginate_lines
 from remote_mcp_commander.policy import (
     TRUSTED_GENERIC_EXEC_PATH,
     resolve_generic_executable,
@@ -460,33 +461,20 @@ class CommandSessionManager:
             )
         text = session.stdout if stream == "stdout" else session.stderr
         truncated = session.stdout_truncated if stream == "stdout" else session.stderr_truncated
-        pending_partial = (
-            session.state == "running"
-            and bool(text)
-            and not text.endswith(("\n", "\r"))
+        page = paginate_lines(
+            text, running=session.state == "running", offset=offset, max_lines=max_lines
         )
-        lines = text.splitlines(keepends=True)
-        if pending_partial and lines:
-            lines = lines[:-1]
-        total = len(lines)
-        if offset < 0:
-            start = max(0, total + offset)
-            selected = lines[start:]
-        else:
-            start = min(offset, total)
-            selected = lines[start : start + max_lines]
-        next_line = start + len(selected)
         return CommandSessionLineOutput(
             request_id=request_id,
             session_id=session_id,
             state=session.state,
             stream=stream,
-            content="".join(selected),
-            total_lines=total,
-            start_line=start,
-            next_line=next_line,
-            eof=session.state != "running" and next_line >= total,
-            pending_partial=pending_partial,
+            content=page.content,
+            total_lines=page.total_lines,
+            start_line=page.start_line,
+            next_line=page.next_line,
+            eof=page.eof,
+            pending_partial=page.pending_partial,
             output_truncated=truncated,
             error=session.error,
         )

@@ -80,7 +80,7 @@ def detect_capabilities(settings: Settings, roots: list[Path]) -> list[str]:
         resolve_pty_executable(name, search_path=settings.command_search_path) is not None
         for name in settings.pty_executable_allowlist
     ):
-        capabilities.add("command.pty")
+        capabilities.update({"command.pty", "command.pty_output_lines"})
 
     if {"command.session", "command.pty"}.intersection(capabilities):
         capabilities.add("command.session_list")

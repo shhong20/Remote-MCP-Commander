@@ -29,3 +29,4 @@
 - [Command session stdin](command-session-stdin.md)
 - [Per-command timeout overrides](per-command-timeouts.md)
 - [Command output line pagination](command-output-lines.md)
+- [PTY output line pagination](pty-output-lines.md)

@@ -112,8 +112,10 @@ def test_pty_capability_requires_dedicated_allowlist_and_posix(monkeypatch) -> N
     enabled = capabilities.detect_capabilities(make_settings(pty_allowed_executables="bash"), [])
 
     assert "command.pty" not in disabled
+    assert "command.pty_output_lines" not in disabled
     assert "command.session_list" not in disabled
     assert "command.pty" in enabled
+    assert "command.pty_output_lines" in enabled
     assert "command.session_list" in enabled
 
 
