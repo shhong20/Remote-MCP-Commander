@@ -27,6 +27,7 @@ from remote_mcp_commander.agent.filesystem_ops import (
     list_file_roots,
 )
 from remote_mcp_commander.agent.git_ops import git_status
+from remote_mcp_commander.agent.line_wait_dispatcher import LineOutputWaitDispatcher
 from remote_mcp_commander.agent.one_shot import OneShotCommandDispatcher
 from remote_mcp_commander.agent.path_ops import mutate_path
 from remote_mcp_commander.agent.pty_ops import PtySessionManager
@@ -160,6 +161,7 @@ async def agent_loop() -> None:
                 )
                 search_sessions = FileSearchSessionManager(roots=roots)
                 search_starts = FileSearchStartDispatcher(search_sessions)
+                line_waits = LineOutputWaitDispatcher(sessions, pty_sessions)
                 hello = AgentHello(
                     agent_id=settings.agent_id,
                     hostname=socket.gethostname(),
@@ -304,14 +306,18 @@ async def agent_loop() -> None:
 
                         if message_type == "command_session_line_output_request":
                             request = CommandSessionLineOutputRequest.model_validate(payload)
-                            result = await sessions.output_lines(
-                                request.request_id,
-                                request.session_id,
-                                stream=request.stream,
-                                offset=request.offset,
-                                max_lines=request.max_lines,
-                            )
-                            await websocket.send(result.model_dump_json())
+                            if request.wait_ms > 0:
+                                await line_waits.submit_command(request, websocket.send)
+                            else:
+                                result = await sessions.output_lines(
+                                    request.request_id,
+                                    request.session_id,
+                                    stream=request.stream,
+                                    offset=request.offset,
+                                    max_lines=request.max_lines,
+                                    wait_ms=0,
+                                )
+                                await websocket.send(result.model_dump_json())
                             continue
 
                         if message_type == "command_session_discard_request":
@@ -382,13 +388,15 @@ async def agent_loop() -> None:
 
                         if message_type == "pty_session_line_output_request":
                             request = PtySessionLineOutputRequest.model_validate(payload)
-                            result = await pty_sessions.output_lines(
-                                request.request_id,
-                                request.session_id,
-                                offset=request.offset,
-                                max_lines=request.max_lines,
-                            )
-                            await websocket.send(result.model_dump_json())
+                            if request.wait_ms > 0:
+                                await line_waits.submit_pty(request, websocket.send)
+                            else:
+                                result = await pty_sessions.output_lines(
+                                    request.request_id, request.session_id,
+                                    offset=request.offset, max_lines=request.max_lines,
+                                    wait_ms=0,
+                                )
+                                await websocket.send(result.model_dump_json())
                             continue
 
                         if message_type == "pty_session_discard_request":
@@ -666,6 +674,7 @@ async def agent_loop() -> None:
                         pty_sessions.cancel_all(),
                         one_shot.cancel_all(),
                         search_starts.cancel_all(),
+                        line_waits.cancel_all(),
                     )
                     await asyncio.gather(heartbeat_task, return_exceptions=True)
         except (OSError, websockets.ConnectionClosed):

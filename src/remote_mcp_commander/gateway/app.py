@@ -936,6 +936,8 @@ async def get_command_session_output_lines(
     if connection is None:
         raise HTTPException(status_code=404, detail="agent not connected")
     require_agent_capability(connection, "command.output_lines")
+    if body.wait_ms > 0:
+        require_agent_capability(connection, "command.output_wait")
     request_id = uuid.uuid4().hex
     future = pending_request(connection, request_id)
     try:
@@ -943,7 +945,10 @@ async def get_command_session_output_lines(
             request_id=request_id, session_id=session_id, **body.model_dump()
         )
         await connection.websocket.send_text(request.model_dump_json())
-        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        reply_timeout = max(
+            settings.request_timeout_s, body.wait_ms / 1000.0 + 2.0
+        )
+        reply = await asyncio.wait_for(future, timeout=reply_timeout)
         if not isinstance(reply, CommandSessionLineOutput):
             raise HTTPException(status_code=502, detail="unexpected agent response")
         return reply
@@ -1262,6 +1267,8 @@ async def get_pty_output_lines(
     if connection is None:
         raise HTTPException(status_code=404, detail="agent not connected")
     require_agent_capability(connection, "command.pty_output_lines")
+    if body.wait_ms > 0:
+        require_agent_capability(connection, "command.output_wait")
     request_id = uuid.uuid4().hex
     future = pending_request(connection, request_id)
     try:
@@ -1269,7 +1276,10 @@ async def get_pty_output_lines(
             request_id=request_id, session_id=session_id, **body.model_dump()
         )
         await connection.websocket.send_text(request.model_dump_json())
-        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        reply_timeout = max(
+            settings.request_timeout_s, body.wait_ms / 1000.0 + 2.0
+        )
+        reply = await asyncio.wait_for(future, timeout=reply_timeout)
         if not isinstance(reply, PtySessionLineOutput):
             raise HTTPException(status_code=502, detail="unexpected agent response")
         return reply

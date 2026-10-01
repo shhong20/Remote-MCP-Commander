@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import asyncio
+from collections.abc import Callable
 from dataclasses import dataclass
 
 
@@ -50,3 +52,58 @@ def paginate_lines(
         eof=not running and next_line >= total,
         pending_partial=running and has_partial,
     )
+
+
+async def wait_for_line_page(
+    get_text: Callable[[], str],
+    is_running: Callable[[], bool],
+    can_grow: Callable[[], bool],
+    output_event: asyncio.Event,
+    *,
+    offset: int,
+    max_lines: int,
+    wait_ms: int,
+) -> tuple[LinePage, int, bool]:
+    loop = asyncio.get_running_loop()
+    started = loop.time()
+    deadline = started + wait_ms / 1000.0
+    wait_timed_out = False
+
+    while True:
+        running = is_running()
+        page = paginate_lines(
+            get_text(), running=running, offset=offset, max_lines=max_lines
+        )
+        if (
+            wait_ms <= 0
+            or offset < 0
+            or page.content
+            or not running
+            or not can_grow()
+        ):
+            break
+
+        remaining = deadline - loop.time()
+        if remaining <= 0:
+            wait_timed_out = True
+            break
+
+        output_event.clear()
+        running = is_running()
+        page = paginate_lines(
+            get_text(), running=running, offset=offset, max_lines=max_lines
+        )
+        if page.content or not running or not can_grow():
+            break
+        try:
+            await asyncio.wait_for(output_event.wait(), timeout=remaining)
+        except TimeoutError:
+            wait_timed_out = True
+            running = is_running()
+            page = paginate_lines(
+                get_text(), running=running, offset=offset, max_lines=max_lines
+            )
+            break
+
+    waited_ms = max(0, int((loop.time() - started) * 1000)) if wait_ms else 0
+    return page, waited_ms, wait_timed_out

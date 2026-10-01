@@ -71,6 +71,7 @@ def test_capabilities_reflect_available_tools_and_allowed_roots(
         "command.stdin",
         "command.timeout",
         "command.output_lines",
+        "command.output_wait",
         "command.session_list",
     }
     assert result == sorted(expected)
@@ -114,9 +115,11 @@ def test_pty_capability_requires_dedicated_allowlist_and_posix(monkeypatch) -> N
 
     assert "command.pty" not in disabled
     assert "command.pty_output_lines" not in disabled
+    assert "command.output_wait" not in disabled
     assert "command.session_list" not in disabled
     assert "command.pty" in enabled
     assert "command.pty_output_lines" in enabled
+    assert "command.output_wait" in enabled
     assert "command.session_list" in enabled
 
 

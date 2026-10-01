@@ -4,13 +4,13 @@ import asyncio
 import codecs
 import os
 import signal
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
 from remote_mcp_commander.agent.env_policy import merge_command_env
 from remote_mcp_commander.agent.file_ops import resolve_allowed_directory
-from remote_mcp_commander.agent.output_lines import paginate_lines
+from remote_mcp_commander.agent.output_lines import wait_for_line_page
 from remote_mcp_commander.policy import (
     TRUSTED_GENERIC_EXEC_PATH,
     resolve_generic_executable,
@@ -47,6 +47,8 @@ class _CommandSession:
     cancel_requested: bool = False
     stdin_closed: bool = False
     task: asyncio.Task[None] | None = None
+    stdout_event: asyncio.Event = field(default_factory=asyncio.Event)
+    stderr_event: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 class CommandSessionManager:
@@ -216,15 +218,19 @@ class CommandSessionManager:
                 break
             remaining = max(0, self.max_output_bytes - retained_bytes)
             accepted = chunk[:remaining]
+            output_event = getattr(session, f"{output_attr}_event")
             if accepted:
                 text = decoder.decode(accepted, final=False)
                 setattr(session, output_attr, getattr(session, output_attr) + text)
                 retained_bytes += len(accepted)
+                output_event.set()
             if len(chunk) > remaining:
                 setattr(session, truncated_attr, True)
+                output_event.set()
         tail = decoder.decode(b"", final=True)
         if tail:
             setattr(session, output_attr, getattr(session, output_attr) + tail)
+            getattr(session, f"{output_attr}_event").set()
 
     async def _wait_readers(self, *tasks: asyncio.Task[None]) -> str | None:
         results = await asyncio.gather(*tasks, return_exceptions=True)
@@ -308,6 +314,8 @@ class CommandSessionManager:
             session.state = terminal_state
             session.error = terminal_error
             session.finished_at = datetime.now(UTC)
+            session.stdout_event.set()
+            session.stderr_event.set()
 
     async def write_input(
         self, request_id: str, session_id: str, data: str
@@ -452,6 +460,7 @@ class CommandSessionManager:
         stream: str,
         offset: int,
         max_lines: int,
+        wait_ms: int = 0,
     ) -> CommandSessionLineOutput:
         session = self._sessions.get(session_id)
         if session is None:
@@ -459,11 +468,18 @@ class CommandSessionManager:
                 request_id=request_id, session_id=session_id, state="failed",
                 stream=stream, rejected=True, error="session not found",
             )
-        text = session.stdout if stream == "stdout" else session.stderr
-        truncated = session.stdout_truncated if stream == "stdout" else session.stderr_truncated
-        page = paginate_lines(
-            text, running=session.state == "running", offset=offset, max_lines=max_lines
+        page, waited_ms, wait_timed_out = await wait_for_line_page(
+            lambda: session.stdout if stream == "stdout" else session.stderr,
+            lambda: session.state == "running",
+            lambda: not (
+                session.stdout_truncated if stream == "stdout" else session.stderr_truncated
+            ),
+            session.stdout_event if stream == "stdout" else session.stderr_event,
+            offset=offset,
+            max_lines=max_lines,
+            wait_ms=wait_ms,
         )
+        truncated = session.stdout_truncated if stream == "stdout" else session.stderr_truncated
         return CommandSessionLineOutput(
             request_id=request_id,
             session_id=session_id,
@@ -476,6 +492,8 @@ class CommandSessionManager:
             eof=page.eof,
             pending_partial=page.pending_partial,
             output_truncated=truncated,
+            waited_ms=waited_ms,
+            wait_timed_out=wait_timed_out,
             error=session.error,
         )
 

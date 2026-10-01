@@ -194,6 +194,7 @@ async def test_command_session_tools_use_structured_contracts() -> None:
     assert line_schema["properties"]["stream"]["default"] == "stdout"
     assert line_schema["properties"]["offset"]["default"] == 0
     assert line_schema["properties"]["max_lines"]["default"] == 200
+    assert line_schema["properties"]["wait_ms"]["default"] == 0
     assert set(tools["discard_command"].input_schema["required"]) == {
         "agent_id",
         "session_id",
@@ -224,6 +225,7 @@ async def test_pty_tools_use_structured_contracts() -> None:
     assert set(line_schema["required"]) == {"agent_id", "session_id"}
     assert line_schema["properties"]["offset"]["default"] == 0
     assert line_schema["properties"]["max_lines"]["default"] == 200
+    assert line_schema["properties"]["wait_ms"]["default"] == 0
 
 
 @pytest.mark.asyncio

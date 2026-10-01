@@ -250,3 +250,51 @@ async def test_running_pty_output_lines_hides_partial_last_line(tmp_path: Path) 
     assert page.pending_partial is True
     assert page.eof is False
     await manager.cancel("cancel", session_id)
+
+
+@pytest.mark.asyncio
+async def test_pty_line_long_poll_wakes_on_stable_line(tmp_path: Path) -> None:
+    make_fake_terminal(
+        tmp_path,
+        "import sys,time\n"
+        "sys.stdout.write('partial')\n"
+        "sys.stdout.flush()\n"
+        "time.sleep(0.08)\n"
+        "sys.stdout.write('-done\\n')\n"
+        "sys.stdout.flush()\n"
+        "time.sleep(30)\n",
+    )
+    manager = make_manager(timeout_s=60.0, exec_search_path=str(tmp_path))
+    session_id = "7" * 32
+    await manager.start("start", session_id, ["terminal"], columns=80, rows=24)
+
+    page = await manager.output_lines(
+        "wait", session_id, offset=0, max_lines=10, wait_ms=1000
+    )
+    assert page.content.replace("\r", "") == "partial-done\n"
+    assert page.wait_timed_out is False
+    assert 0 < page.waited_ms < 1000
+    await manager.cancel("cancel", session_id)
+
+@pytest.mark.asyncio
+async def test_pty_line_long_poll_times_out_on_partial_line(tmp_path: Path) -> None:
+    make_fake_terminal(
+        tmp_path,
+        "import sys,time\n"
+        "sys.stdout.write('partial')\n"
+        "sys.stdout.flush()\n"
+        "time.sleep(30)\n",
+    )
+    manager = make_manager(timeout_s=60.0, exec_search_path=str(tmp_path))
+    session_id = "8" * 32
+    await manager.start("start", session_id, ["terminal"], columns=80, rows=24)
+    await wait_for_output(manager, session_id, "partial")
+
+    page = await manager.output_lines(
+        "wait", session_id, offset=0, max_lines=10, wait_ms=80
+    )
+    assert page.content == ""
+    assert page.pending_partial is True
+    assert page.wait_timed_out is True
+    assert page.waited_ms >= 50
+    await manager.cancel("cancel", session_id)

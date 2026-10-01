@@ -426,3 +426,112 @@ async def test_running_command_output_lines_hides_partial_last_line(tmp_path: Pa
     assert page.pending_partial is True
     assert page.eof is False
     await manager.cancel("cancel", session_id)
+
+
+@pytest.mark.asyncio
+async def test_command_line_long_poll_wakes_on_stable_line(tmp_path: Path) -> None:
+    body = (
+        "import sys,time\n"
+        "sys.stdout.write('partial')\n"
+        "sys.stdout.flush()\n"
+        "time.sleep(0.08)\n"
+        "sys.stdout.write('-done\\n')\n"
+        "sys.stdout.flush()\n"
+        "time.sleep(30)\n"
+    )
+    make_fake_uptime(tmp_path, body)
+    manager = make_manager(timeout_s=60.0, exec_search_path=str(tmp_path))
+    session_id = "a3" * 16
+    await manager.start("start", session_id, ["uptime"])
+
+    page = await manager.output_lines(
+        "wait", session_id, stream="stdout", offset=0,
+        max_lines=10, wait_ms=1000,
+    )
+    assert page.content == "partial-done\n"
+    assert page.wait_timed_out is False
+    assert 0 < page.waited_ms < 1000
+    assert page.state == "running"
+    await manager.cancel("cancel", session_id)
+
+@pytest.mark.asyncio
+async def test_command_line_long_poll_times_out_on_partial_line(tmp_path: Path) -> None:
+    import asyncio
+
+    body = (
+        "import sys,time\n"
+        "sys.stdout.write('partial')\n"
+        "sys.stdout.flush()\n"
+        "time.sleep(30)\n"
+    )
+    make_fake_uptime(tmp_path, body)
+    manager = make_manager(timeout_s=60.0, exec_search_path=str(tmp_path))
+    session_id = "a4" * 16
+    await manager.start("start", session_id, ["uptime"])
+    await asyncio.sleep(0.05)
+
+    page = await manager.output_lines(
+        "wait", session_id, stream="stdout", offset=0,
+        max_lines=10, wait_ms=80,
+    )
+    assert page.content == ""
+    assert page.pending_partial is True
+    assert page.wait_timed_out is True
+    assert page.waited_ms >= 50
+    await manager.cancel("cancel", session_id)
+
+@pytest.mark.asyncio
+async def test_command_line_long_poll_returns_terminal_partial(tmp_path: Path) -> None:
+    body = (
+        "import sys,time\n"
+        "sys.stdout.write('final')\n"
+        "sys.stdout.flush()\n"
+        "time.sleep(0.08)\n"
+    )
+    make_fake_uptime(tmp_path, body)
+    manager = make_manager(timeout_s=2.0, exec_search_path=str(tmp_path))
+    session_id = "a5" * 16
+    await manager.start("start", session_id, ["uptime"])
+
+    page = await manager.output_lines(
+        "wait", session_id, stream="stdout", offset=0,
+        max_lines=10, wait_ms=1000,
+    )
+    assert page.content == "final"
+    assert page.state == "completed"
+    assert page.eof is True
+    assert page.pending_partial is False
+    assert page.wait_timed_out is False
+
+@pytest.mark.asyncio
+async def test_command_line_long_poll_returns_immediately_when_output_is_capped(
+    tmp_path: Path,
+) -> None:
+    import asyncio
+
+    body = (
+        "import sys,time\n"
+        "sys.stdout.write('x' * 100)\n"
+        "sys.stdout.flush()\n"
+        "time.sleep(30)\n"
+    )
+    make_fake_uptime(tmp_path, body)
+    manager = make_manager(
+        timeout_s=60.0, max_output_bytes=8, exec_search_path=str(tmp_path)
+    )
+    session_id = "a6" * 16
+    await manager.start("start", session_id, ["uptime"])
+    for _ in range(100):
+        status = await manager.status("status", session_id)
+        if status.stdout_truncated:
+            break
+        await asyncio.sleep(0.01)
+
+    page = await manager.output_lines(
+        "wait", session_id, stream="stdout", offset=0,
+        max_lines=10, wait_ms=500,
+    )
+    assert page.output_truncated is True
+    assert page.wait_timed_out is False
+    assert page.waited_ms < 100
+    await manager.cancel("cancel", session_id)

@@ -83,6 +83,9 @@ def detect_capabilities(settings: Settings, roots: list[Path]) -> list[str]:
     ):
         capabilities.update({"command.pty", "command.pty_output_lines"})
 
+    if {"command.output_lines", "command.pty_output_lines"}.intersection(capabilities):
+        capabilities.add("command.output_wait")
+
     if {"command.session", "command.pty"}.intersection(capabilities):
         capabilities.add("command.session_list")
 
