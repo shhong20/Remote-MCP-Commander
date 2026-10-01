@@ -30,6 +30,15 @@ def process_create_time_ms(pid: int) -> int | None:
         return None
 
 
+def process_signal_value(requested_signal: ProcessSignal) -> int | None:
+    return {
+        "term": signal_module.SIGTERM,
+        "kill": signal_module.SIGKILL,
+        "int": signal_module.SIGINT,
+        "hup": getattr(signal_module, "SIGHUP", None),
+    }[requested_signal]
+
+
 def _list_processes_sync(request_id: str, limit: int) -> ProcessListResult:
     processes: list[ProcessInfo] = []
     for process in psutil.process_iter(attrs=["pid", "name", "username", "status", "memory_info"]):
@@ -247,13 +256,7 @@ def _signal_process_sync(
             rejected=True,
             error="refusing to signal the Agent process",
         )
-    signal_map = {
-        "term": signal_module.SIGTERM,
-        "kill": signal_module.SIGKILL,
-        "int": signal_module.SIGINT,
-        "hup": getattr(signal_module, "SIGHUP", None),
-    }
-    signal_value = signal_map[requested_signal]
+    signal_value = process_signal_value(requested_signal)
     if signal_value is None:
         return ProcessSignalResult(
             request_id=request_id,

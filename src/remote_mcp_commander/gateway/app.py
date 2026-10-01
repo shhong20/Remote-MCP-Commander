@@ -178,6 +178,9 @@ from remote_mcp_commander.protocol import (
     SessionListBody,
     SessionListRequest,
     SessionListResult,
+    SessionSignalBody,
+    SessionSignalRequest,
+    SessionSignalResult,
     SystemHealthRequest,
     SystemHealthResult,
     TreeInspectBody,
@@ -220,6 +223,7 @@ AgentReply = (
     | CommandSessionStdinCloseResult
     | CommandSessionDiscardResult
     | SessionListResult
+    | SessionSignalResult
     | PtySessionSnapshot
     | PtySessionOutput
     | PtySessionLineOutput
@@ -689,6 +693,64 @@ async def list_runtime_sessions(
         return reply
     except TimeoutError as exc:
         raise HTTPException(status_code=504, detail="agent session list timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/sessions/{session_id}/signal",
+    dependencies=[Depends(require_control_token)],
+)
+async def signal_runtime_session(
+    agent_id: str,
+    session_id: str,
+    body: SessionSignalBody,
+    settings: SettingsDep,
+) -> SessionSignalResult:
+    validate_command_session_id(session_id)
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "command.session_signal")
+    if not settings.personal_mode or settings.personal_process_approval_required:
+        raise HTTPException(
+            status_code=403,
+            detail="session signal is available only in personal mode without process approval",
+        )
+    request_id = uuid.uuid4().hex
+    audit_required(
+        "session_signal_requested",
+        agent_id=agent_id,
+        session_id=session_id,
+        kind=body.kind,
+        signal=body.signal,
+    )
+    future = pending_request(connection, request_id)
+    try:
+        request = SessionSignalRequest(
+            request_id=request_id,
+            session_id=session_id,
+            kind=body.kind,
+            signal=body.signal,
+        )
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, SessionSignalResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "session_signal_result",
+            agent_id=agent_id,
+            session_id=session_id,
+            kind=body.kind,
+            signal=body.signal,
+            signal_sent=reply.signal_sent,
+            rejected=reply.rejected,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent session signal timed out") from exc
     except ConnectionError as exc:
         raise HTTPException(status_code=503, detail="agent disconnected") from exc
     finally:
@@ -2671,6 +2733,8 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
                 reply = CommandSessionDiscardResult.model_validate(payload)
             elif message_type == "session_list_result":
                 reply = SessionListResult.model_validate(payload)
+            elif message_type == "session_signal_result":
+                reply = SessionSignalResult.model_validate(payload)
             elif message_type == "pty_session_snapshot":
                 reply = PtySessionSnapshot.model_validate(payload)
             elif message_type == "pty_session_output":

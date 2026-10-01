@@ -49,6 +49,7 @@ from remote_mcp_commander.protocol import (
     ServiceLogsResult,
     ServiceStatusResult,
     SessionListResult,
+    SessionSignalResult,
     SystemHealthResult,
     TreeInspectResult,
     TreeMutationResult,
@@ -164,6 +165,21 @@ class GatewayClient:
             ),
         )
         return CommandResult.model_validate(payload)
+
+    async def signal_session(
+        self,
+        agent_id: str,
+        session_id: str,
+        *,
+        kind: str,
+        requested_signal: str,
+    ) -> SessionSignalResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/sessions/{session_id}/signal",
+            json_body={"kind": kind, "signal": requested_signal},
+        )
+        return SessionSignalResult.model_validate(payload)
 
     async def start_command_session(
         self,

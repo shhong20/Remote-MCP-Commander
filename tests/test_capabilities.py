@@ -84,6 +84,7 @@ def test_personal_mode_advertises_filesystem_mutation(tmp_path: Path) -> None:
     assert "filesystem.mutate" in result
     assert "filesystem.tree_mutate" in result
     assert "command.env" in result
+    assert "command.session_signal" in result
 
 
 def test_git_capability_requires_allowed_root(monkeypatch) -> None:
@@ -162,3 +163,13 @@ def test_gateway_agent_info_exposes_advertised_capabilities() -> None:
     info = agent_info("server-01", connection)
 
     assert info.capabilities == ["git.status", "file.read"]
+
+
+def test_personal_mode_can_disable_session_signal_with_approval_requirement(tmp_path: Path) -> None:
+    result = capabilities.detect_capabilities(
+        make_settings(
+            operation_mode="personal", personal_process_approval_required=True
+        ),
+        [tmp_path.resolve()],
+    )
+    assert "command.session_signal" not in result

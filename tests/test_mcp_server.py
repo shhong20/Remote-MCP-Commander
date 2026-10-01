@@ -59,6 +59,7 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "service_status",
         "terminate_process",
         "signal_process",
+        "signal_session",
         "service_action",
         "start_command",
         "list_sessions",
@@ -321,3 +322,15 @@ async def test_recursive_tree_tools_require_inspection_fingerprint() -> None:
     assert {"agent_id", "source", "destination", "expected_tree_sha256"} == set(copy["required"])
     delete = tools["delete_tree"].input_schema
     assert {"agent_id", "path", "expected_tree_sha256"} == set(delete["required"])
+
+
+@pytest.mark.asyncio
+async def test_signal_session_schema_is_session_bound() -> None:
+    server = build_mcp(make_settings())
+    async with Client(server) as client:
+        result = await client.list_tools()
+    tools = {tool.name: tool for tool in result.tools}
+    schema = tools["signal_session"].input_schema
+    assert set(schema["required"]) == {"agent_id", "session_id", "kind", "signal"}
+    assert "pid" not in schema["properties"]
+    assert "approval_id" not in schema["properties"]

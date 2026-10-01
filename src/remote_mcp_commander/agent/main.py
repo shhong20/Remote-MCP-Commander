@@ -99,6 +99,8 @@ from remote_mcp_commander.protocol import (
     ServiceStatusRequest,
     SessionListRequest,
     SessionListResult,
+    SessionSignalRequest,
+    SessionSignalResult,
     SystemHealthRequest,
     TreeInspectRequest,
     TreeMutationRequest,
@@ -250,6 +252,31 @@ async def agent_loop() -> None:
                                 total_count=total_count,
                                 truncated=total_count > request.limit,
                             )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "session_signal_request":
+                            request = SessionSignalRequest.model_validate(payload)
+                            if (
+                                not settings.personal_mode
+                                or settings.personal_process_approval_required
+                            ):
+                                result = SessionSignalResult(
+                                    request_id=request.request_id,
+                                    session_id=request.session_id,
+                                    kind=request.kind,
+                                    signal=request.signal,
+                                    rejected=True,
+                                    error="session signal is disabled by Agent policy",
+                                )
+                            elif request.kind == "command":
+                                result = await sessions.signal_session(
+                                    request.request_id, request.session_id, request.signal
+                                )
+                            else:
+                                result = await pty_sessions.signal_session(
+                                    request.request_id, request.session_id, request.signal
+                                )
                             await websocket.send(result.model_dump_json())
                             continue
 
