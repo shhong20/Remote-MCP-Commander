@@ -33,3 +33,4 @@
 - [Large-file tail reads](large-file-tail.md)
 - [Output line long polling](output-line-long-poll.md)
 - [Runtime session process identity](session-process-identity.md)
+- [Direct process metadata lookup](process-info.md)

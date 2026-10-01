@@ -10,6 +10,7 @@ import psutil
 
 from remote_mcp_commander.protocol import (
     ProcessInfo,
+    ProcessInfoResult,
     ProcessListResult,
     ProcessSignal,
     ProcessSignalResult,
@@ -60,6 +61,49 @@ def _list_processes_sync(request_id: str, limit: int) -> ProcessListResult:
 
 async def list_processes(request_id: str, limit: int) -> ProcessListResult:
     return await asyncio.to_thread(_list_processes_sync, request_id, limit)
+
+
+def _process_info_sync(request_id: str, pid: int) -> ProcessInfoResult:
+    try:
+        process = psutil.Process(pid)
+        create_time_ms = round(process.create_time() * 1000)
+        with process.oneshot():
+            name = process.name()
+            try:
+                username = process.username()
+            except psutil.AccessDenied:
+                username = None
+            try:
+                status = process.status()
+            except psutil.AccessDenied:
+                status = None
+            try:
+                memory_rss = process.memory_info().rss
+            except psutil.AccessDenied:
+                memory_rss = None
+        return ProcessInfoResult(
+            request_id=request_id,
+            process=ProcessInfo(
+                pid=pid,
+                create_time_ms=create_time_ms,
+                name=name,
+                username=username,
+                status=status,
+                memory_rss=memory_rss,
+            ),
+        )
+    except psutil.NoSuchProcess:
+        return ProcessInfoResult(
+            request_id=request_id, rejected=True, error="process no longer exists"
+        )
+    except (psutil.AccessDenied, psutil.ZombieProcess):
+        return ProcessInfoResult(
+            request_id=request_id, rejected=True, error="process identity is not readable"
+        )
+
+
+async def process_info(request_id: str, pid: int) -> ProcessInfoResult:
+    return await asyncio.to_thread(_process_info_sync, request_id, pid)
 
 
 async def service_status(request_id: str, unit: str, timeout_s: float) -> ServiceStatusResult:

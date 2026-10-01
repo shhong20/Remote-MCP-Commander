@@ -18,6 +18,7 @@ BASE_CAPABILITIES = {
     "diagnostics.system_health",
     "diagnostics.port_lookup",
     "process.list",
+    "process.info",
     "process.terminate",
     "process.signal",
 }

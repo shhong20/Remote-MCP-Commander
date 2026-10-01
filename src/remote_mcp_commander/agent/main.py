@@ -39,6 +39,7 @@ from remote_mcp_commander.agent.search_session_ops import (
 from remote_mcp_commander.agent.session_ops import CommandSessionManager
 from remote_mcp_commander.agent.system_ops import (
     list_processes,
+    process_info,
     service_action,
     service_status,
     signal_process,
@@ -81,6 +82,7 @@ from remote_mcp_commander.protocol import (
     PingRequest,
     PingResult,
     PortLookupRequest,
+    ProcessInfoRequest,
     ProcessListRequest,
     ProcessSignalRequest,
     ProcessTerminateRequest,
@@ -620,6 +622,12 @@ async def agent_loop() -> None:
                         if message_type == "process_list_request":
                             request = ProcessListRequest.model_validate(payload)
                             result = await list_processes(request.request_id, request.limit)
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "process_info_request":
+                            request = ProcessInfoRequest.model_validate(payload)
+                            result = await process_info(request.request_id, request.pid)
                             await websocket.send(result.model_dump_json())
                             continue
 

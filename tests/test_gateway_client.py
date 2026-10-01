@@ -996,3 +996,32 @@ async def test_tail_file_client_sends_bounded_payload() -> None:
     assert seen[0].url.path.endswith("/files/tail")
     assert b'"lines":5' in seen[0].content
     assert b'"max_bytes":8192' in seen[0].content
+
+@pytest.mark.asyncio
+async def test_process_info_client_sends_exact_pid() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "proc-info",
+                "process": {
+                    "pid": 4242,
+                    "create_time_ms": 123456789,
+                    "name": "bash",
+                    "username": "ubuntu",
+                    "status": "sleeping",
+                    "memory_rss": 4096,
+                },
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    result = await client.process_info("server-01", 4242)
+
+    assert result.process is not None
+    assert result.process.pid == 4242
+    assert seen[0].url.path.endswith("/processes/info")
+    assert b'"pid":4242' in seen[0].content

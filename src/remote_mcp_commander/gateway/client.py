@@ -34,6 +34,7 @@ from remote_mcp_commander.protocol import (
     PathMutationResult,
     PingResponse,
     PortLookupResult,
+    ProcessInfoResult,
     ProcessListResult,
     ProcessSignalResult,
     ProcessTerminateResult,
@@ -704,6 +705,14 @@ class GatewayClient:
             json_body={"limit": limit},
         )
         return ProcessListResult.model_validate(payload)
+
+    async def process_info(self, agent_id: str, pid: int) -> ProcessInfoResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/processes/info",
+            json_body={"pid": pid},
+        )
+        return ProcessInfoResult.model_validate(payload)
 
     async def service_status(self, agent_id: str, unit: str) -> ServiceStatusResult:
         payload = await self._request(
