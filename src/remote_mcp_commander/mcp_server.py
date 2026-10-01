@@ -17,6 +17,7 @@ from remote_mcp_commander.protocol import (
     CommandResult,
     CommandSessionDiscardResult,
     CommandSessionInputResult,
+    CommandSessionLineOutput,
     CommandSessionOutput,
     CommandSessionSnapshot,
     CommandSessionStdinCloseResult,
@@ -218,6 +219,19 @@ def build_mcp(settings: Settings) -> MCPServer:
             stdout_offset=stdout_offset,
             stderr_offset=stderr_offset,
             max_chars=max_chars,
+        )
+
+    @server.tool()
+    async def command_output_lines(
+        agent_id: str,
+        session_id: str,
+        stream: str = "stdout",
+        offset: int = 0,
+        max_lines: int = 200,
+    ) -> CommandSessionLineOutput:
+        """Read command output by stable line ranges or tail semantics."""
+        return await GatewayClient(settings).command_session_output_lines(
+            agent_id, session_id, stream=stream, offset=offset, max_lines=max_lines
         )
 
     @server.tool()

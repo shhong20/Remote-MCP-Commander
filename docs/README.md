@@ -28,3 +28,4 @@
 - [Line-based text file reads](line-file-read.md)
 - [Command session stdin](command-session-stdin.md)
 - [Per-command timeout overrides](per-command-timeouts.md)
+- [Command output line pagination](command-output-lines.md)
