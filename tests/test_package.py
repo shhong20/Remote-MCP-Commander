@@ -3,11 +3,13 @@ from __future__ import annotations
 import os
 import subprocess
 import sys
+import tomllib
 from pathlib import Path
 
 import pytest
 
 from remote_mcp_commander.package import (
+    BUILD_TOOLCHAIN,
     PACKAGE_MANIFEST,
     PackagingError,
     _snapshot,
@@ -15,6 +17,15 @@ from remote_mcp_commander.package import (
     verify_bundle,
 )
 
+
+def test_packaging_extra_matches_build_toolchain() -> None:
+    root = Path(__file__).resolve().parents[1]
+    payload = tomllib.loads((root / "pyproject.toml").read_text())
+    requirements = payload["project"]["optional-dependencies"]["packaging"]
+    pins = dict(item.split("==", 1) for item in requirements if "==" in item)
+
+    for package, version in BUILD_TOOLCHAIN.items():
+        assert pins[package] == version
 
 def _write_minimal_project(root: Path, *, backend: str = "setuptools.build_meta") -> None:
     package = root / "src" / "remote_mcp_commander"
