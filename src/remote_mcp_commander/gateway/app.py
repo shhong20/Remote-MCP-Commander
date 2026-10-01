@@ -132,6 +132,9 @@ from remote_mcp_commander.protocol import (
     PortLookupBody,
     PortLookupRequest,
     PortLookupResult,
+    ProcessInfoBody,
+    ProcessInfoRequest,
+    ProcessInfoResult,
     ProcessListBody,
     ProcessListRequest,
     ProcessListResult,
@@ -205,6 +208,7 @@ AgentReply = (
     | FileSearchSessionStopResult
     | PathMutationResult
     | ProcessListResult
+    | ProcessInfoResult
     | ServiceStatusResult
     | ProcessTerminateResult
     | ProcessSignalResult
@@ -2276,6 +2280,40 @@ async def process_list(
 
 
 @app.post(
+    "/api/v1/agents/{agent_id}/processes/info",
+    dependencies=[Depends(require_control_token)],
+)
+async def get_process_info(
+    agent_id: str, body: ProcessInfoBody, settings: SettingsDep
+) -> ProcessInfoResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "process.info")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = ProcessInfoRequest(request_id=request_id, pid=body.pid)
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, ProcessInfoResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "process_info",
+            agent_id=agent_id,
+            pid=body.pid,
+            rejected=reply.rejected,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent process info timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
     "/api/v1/agents/{agent_id}/services/status",
     dependencies=[Depends(require_control_token)],
 )
@@ -2681,6 +2719,8 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
                 reply = PathMutationResult.model_validate(payload)
             elif message_type == "process_list_result":
                 reply = ProcessListResult.model_validate(payload)
+            elif message_type == "process_info_result":
+                reply = ProcessInfoResult.model_validate(payload)
             elif message_type == "service_status_result":
                 reply = ServiceStatusResult.model_validate(payload)
             elif message_type == "process_terminate_result":

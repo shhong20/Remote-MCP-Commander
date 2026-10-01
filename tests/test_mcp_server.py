@@ -55,6 +55,7 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "move_path",
         "delete_path",
         "list_processes",
+        "process_info",
         "service_status",
         "terminate_process",
         "signal_process",
@@ -237,6 +238,7 @@ async def test_diagnostic_tools_use_structured_contracts() -> None:
     tools = {tool.name: tool for tool in result.tools}
     assert set(tools["system_health"].input_schema["required"]) == {"agent_id"}
     assert set(tools["lookup_port"].input_schema["required"]) == {"agent_id", "port"}
+    assert set(tools["process_info"].input_schema["required"]) == {"agent_id", "pid"}
     assert set(tools["service_logs"].input_schema["required"]) == {"agent_id", "unit"}
     assert tools["service_logs"].input_schema["properties"]["lines"]["default"] == 100
     assert set(tools["git_status"].input_schema["required"]) == {"agent_id", "path"}

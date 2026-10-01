@@ -665,6 +665,24 @@ class ProcessInfo(BaseModel):
     memory_rss: int | None = None
 
 
+class ProcessInfoRequest(BaseModel):
+    type: Literal["process_info_request"] = "process_info_request"
+    request_id: str
+    pid: int = Field(ge=1)
+
+
+class ProcessInfoResult(BaseModel):
+    type: Literal["process_info_result"] = "process_info_result"
+    request_id: str
+    process: ProcessInfo | None = None
+    rejected: bool = False
+    error: str | None = None
+
+
+class ProcessInfoBody(BaseModel):
+    pid: int = Field(ge=1)
+
+
 class ProcessListRequest(BaseModel):
     type: Literal["process_list_request"] = "process_list_request"
     request_id: str

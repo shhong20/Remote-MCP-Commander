@@ -1,5 +1,7 @@
+import os
 from pathlib import Path
 
+import psutil
 import pytest
 
 from remote_mcp_commander.agent import system_ops
@@ -55,3 +57,32 @@ async def test_service_status_parses_fixed_systemctl_output(
     assert result.id == "demo.service"
     assert result.active_state == "active"
     assert result.sub_state == "running"
+
+
+@pytest.mark.asyncio
+async def test_process_info_reads_one_pid_without_sensitive_fields() -> None:
+    pid = os.getpid()
+    result = await system_ops.process_info("proc-info", pid)
+
+    assert result.rejected is False
+    assert result.process is not None
+    assert result.process.pid == pid
+    assert result.process.create_time_ms > 0
+    payload = result.process.model_dump()
+    assert "cmdline" not in payload
+    assert "environ" not in payload
+
+
+@pytest.mark.asyncio
+async def test_process_info_rejects_missing_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    pid = 999999
+
+    def missing_process(requested_pid: int):
+        raise psutil.NoSuchProcess(requested_pid)
+
+    monkeypatch.setattr(system_ops.psutil, "Process", missing_process)
+    result = await system_ops.process_info("proc-missing", pid)
+
+    assert result.rejected is True
+    assert result.process is None
+    assert result.error == "process no longer exists"
