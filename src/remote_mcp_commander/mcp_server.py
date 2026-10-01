@@ -45,6 +45,7 @@ from remote_mcp_commander.protocol import (
     ProcessTerminateResult,
     PtySessionDiscardResult,
     PtySessionInputResult,
+    PtySessionLineOutput,
     PtySessionOutput,
     PtySessionResizeResult,
     PtySessionSnapshot,
@@ -291,6 +292,18 @@ def build_mcp(settings: Settings) -> MCPServer:
         """Read only new bounded PTY output using a character cursor."""
         return await GatewayClient(settings).pty_session_output(
             agent_id, session_id, offset=offset, max_chars=max_chars
+        )
+
+    @server.tool()
+    async def pty_output_lines(
+        agent_id: str,
+        session_id: str,
+        offset: int = 0,
+        max_lines: int = 200,
+    ) -> PtySessionLineOutput:
+        """Read PTY output by stable LF-delimited line ranges or tail semantics."""
+        return await GatewayClient(settings).pty_session_output_lines(
+            agent_id, session_id, offset=offset, max_lines=max_lines
         )
 
     @server.tool()

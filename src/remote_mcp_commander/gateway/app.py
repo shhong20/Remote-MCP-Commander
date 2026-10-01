@@ -144,6 +144,9 @@ from remote_mcp_commander.protocol import (
     PtySessionInputBody,
     PtySessionInputRequest,
     PtySessionInputResult,
+    PtySessionLineOutput,
+    PtySessionLineOutputBody,
+    PtySessionLineOutputRequest,
     PtySessionOutput,
     PtySessionOutputBody,
     PtySessionOutputRequest,
@@ -211,6 +214,7 @@ AgentReply = (
     | SessionListResult
     | PtySessionSnapshot
     | PtySessionOutput
+    | PtySessionLineOutput
     | PtySessionInputResult
     | PtySessionResizeResult
     | PtySessionDiscardResult
@@ -1233,6 +1237,40 @@ async def get_pty_output(
         return reply
     except TimeoutError as exc:
         raise HTTPException(status_code=504, detail="agent PTY output timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/pty/sessions/{session_id}/output/lines",
+    dependencies=[Depends(require_control_token)],
+)
+async def get_pty_output_lines(
+    agent_id: str,
+    session_id: str,
+    body: PtySessionLineOutputBody,
+    settings: SettingsDep,
+) -> PtySessionLineOutput:
+    validate_command_session_id(session_id)
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "command.pty_output_lines")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = PtySessionLineOutputRequest(
+            request_id=request_id, session_id=session_id, **body.model_dump()
+        )
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, PtySessionLineOutput):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent PTY line output timed out") from exc
     except ConnectionError as exc:
         raise HTTPException(status_code=503, detail="agent disconnected") from exc
     finally:
@@ -2552,6 +2590,8 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
                 reply = PtySessionSnapshot.model_validate(payload)
             elif message_type == "pty_session_output":
                 reply = PtySessionOutput.model_validate(payload)
+            elif message_type == "pty_session_line_output":
+                reply = PtySessionLineOutput.model_validate(payload)
             elif message_type == "pty_session_input_result":
                 reply = PtySessionInputResult.model_validate(payload)
             elif message_type == "pty_session_resize_result":
