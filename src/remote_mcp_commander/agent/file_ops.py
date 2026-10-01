@@ -4,15 +4,18 @@ import asyncio
 import hashlib
 import os
 import secrets
+import stat
 import tempfile
 from pathlib import Path
 
+from remote_mcp_commander.agent.output_lines import paginate_lines
 from remote_mcp_commander.protocol import (
     FileAppendResult,
     FileLineReadResult,
     FileReadManyItem,
     FileReadManyResult,
     FileReadResult,
+    FileTailResult,
     FileWriteResult,
 )
 
@@ -160,6 +163,94 @@ async def read_text_lines(
     return await asyncio.to_thread(
         _read_text_lines_sync, request_id, raw_path, roots=roots, offset=offset,
         max_lines=max_lines, max_file_bytes=max_file_bytes,
+    )
+
+
+def _tail_text_file_sync(
+    request_id: str,
+    raw_path: str,
+    *,
+    roots: list[Path],
+    lines: int,
+    max_bytes: int,
+) -> FileTailResult:
+    try:
+        requested_path = Path(raw_path).expanduser()
+        if not requested_path.is_absolute():
+            raise PermissionError("file path must be absolute")
+        if requested_path.is_symlink():
+            raise PermissionError("symlink files are not supported")
+        path = resolve_allowed_path(raw_path, roots).resolve(strict=True)
+        before = path.stat()
+        if not stat.S_ISREG(before.st_mode):
+            raise PermissionError("not a regular file")
+        flags = os.O_RDONLY
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
+        if hasattr(os, "O_NONBLOCK"):
+            flags |= os.O_NONBLOCK
+        fd = os.open(path, flags)
+        try:
+            info = os.fstat(fd)
+            if not stat.S_ISREG(info.st_mode):
+                raise PermissionError("not a regular file")
+            if (before.st_dev, before.st_ino) != (info.st_dev, info.st_ino):
+                raise PermissionError("file changed during tail open")
+            size = info.st_size
+            if size == 0:
+                return FileTailResult(
+                    request_id=request_id, path=str(path), size=0,
+                    lines_requested=lines, lines_returned=0, scanned_bytes=0,
+                )
+            target_newlines = lines + 1
+            remaining = min(max_bytes, size)
+            position = size
+            chunks: list[bytes] = []
+            newline_count = 0
+            while position > 0 and remaining > 0 and newline_count < target_newlines:
+                read_size = min(65_536, position, remaining)
+                position -= read_size
+                os.lseek(fd, position, os.SEEK_SET)
+                chunk = os.read(fd, read_size)
+                chunks.insert(0, chunk)
+                newline_count += chunk.count(b"\n")
+                remaining -= len(chunk)
+            starts_at_boundary = position == 0
+            if position > 0:
+                os.lseek(fd, position - 1, os.SEEK_SET)
+                starts_at_boundary = os.read(fd, 1) == b"\n"
+        finally:
+            os.close(fd)
+
+        data = b"".join(chunks)
+        scanned_bytes = len(data)
+        if b"\x00" in data:
+            raise ValueError("binary files are not supported")
+        if position > 0 and not starts_at_boundary:
+            boundary = data.find(b"\n")
+            if boundary < 0:
+                data = b""
+            else:
+                data = data[boundary + 1 :]
+        text = data.decode("utf-8")
+        page = paginate_lines(text, running=False, offset=-lines, max_lines=lines)
+        returned = page.next_line - page.start_line
+        truncated = position > 0 and returned < lines
+        return FileTailResult(
+            request_id=request_id, path=str(path), content=page.content, size=size,
+            lines_requested=lines, lines_returned=returned,
+            scanned_bytes=scanned_bytes, truncated=truncated,
+        )
+    except (OSError, PermissionError, UnicodeDecodeError, ValueError) as exc:
+        return FileTailResult(request_id=request_id, rejected=True, error=str(exc))
+
+
+async def tail_text_file(
+    request_id: str, raw_path: str, *, roots: list[Path], lines: int, max_bytes: int
+) -> FileTailResult:
+    return await asyncio.to_thread(
+        _tail_text_file_sync, request_id, raw_path, roots=roots, lines=lines,
+        max_bytes=max_bytes,
     )
 
 

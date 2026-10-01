@@ -34,6 +34,7 @@ from remote_mcp_commander.protocol import (
     FileSearchSessionListResult,
     FileSearchSessionPage,
     FileSearchSessionStopResult,
+    FileTailResult,
     FileWriteResult,
     GitStatusResult,
     PathMutationResult,
@@ -362,6 +363,15 @@ def build_mcp(settings: Settings) -> MCPServer:
         """Read bounded UTF-8 text by zero-based line offset; negative offset reads a tail."""
         return await GatewayClient(settings).read_file_lines(
             agent_id, path, offset=offset, max_lines=max_lines
+        )
+
+    @server.tool()
+    async def tail_file(
+        agent_id: str, path: str, lines: int = 100, max_bytes: int = 262_144
+    ) -> FileTailResult:
+        """Read the final bounded text lines from a file without scanning the whole file."""
+        return await GatewayClient(settings).tail_file(
+            agent_id, path, lines=lines, max_bytes=max_bytes
         )
 
     @server.tool()
