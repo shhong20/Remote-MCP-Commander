@@ -66,7 +66,9 @@ def detect_capabilities(settings: Settings, roots: list[Path]) -> list[str]:
         resolve_generic_executable(name, search_path=settings.command_search_path) is not None
         for name in configured
     ):
-        capabilities.update({"command.execute", "command.session", "command.stdin"})
+        capabilities.update(
+            {"command.execute", "command.session", "command.stdin", "command.timeout"}
+        )
 
     if os.name == "posix" and any(
         resolve_pty_executable(name, search_path=settings.command_search_path) is not None

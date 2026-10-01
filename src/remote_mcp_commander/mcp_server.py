@@ -144,9 +144,12 @@ def build_mcp(settings: Settings) -> MCPServer:
         argv: list[str],
         cwd: str | None = None,
         env: dict[str, str] | None = None,
+        timeout_s: float | None = None,
     ) -> CommandResult:
-        """Execute argv with optional allowed-root cwd and Personal-mode env overrides."""
-        return await GatewayClient(settings).execute(agent_id, argv, cwd=cwd, env=env)
+        """Execute argv with optional cwd/env and a bounded one-shot timeout override."""
+        return await GatewayClient(settings).execute(
+            agent_id, argv, cwd=cwd, env=env, timeout_s=timeout_s
+        )
 
     @server.tool()
     async def start_command(
@@ -154,10 +157,11 @@ def build_mcp(settings: Settings) -> MCPServer:
         argv: list[str],
         cwd: str | None = None,
         env: dict[str, str] | None = None,
+        timeout_s: float | None = None,
     ) -> CommandSessionSnapshot:
-        """Start a command session with optional cwd and Personal-mode env overrides."""
+        """Start a command session with optional cwd/env and a bounded timeout override."""
         return await GatewayClient(settings).start_command_session(
-            agent_id, argv, cwd=cwd, env=env
+            agent_id, argv, cwd=cwd, env=env, timeout_s=timeout_s
         )
 
     @server.tool()

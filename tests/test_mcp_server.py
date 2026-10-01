@@ -86,6 +86,8 @@ async def test_execute_schema_requires_structured_argv() -> None:
     schema = execute_tool.input_schema
     assert schema["properties"]["argv"]["type"] == "array"
     assert schema["required"] == ["agent_id", "argv"]
+    assert "timeout_s" in schema["properties"]
+    assert "timeout_s" not in schema["required"]
 
 
 def test_streamable_http_requires_mcp_token() -> None:
@@ -147,6 +149,8 @@ async def test_command_session_tools_use_structured_contracts() -> None:
     start_schema = tools["start_command"].input_schema
     assert start_schema["properties"]["argv"]["type"] == "array"
     assert set(start_schema["required"]) == {"agent_id", "argv"}
+    assert "timeout_s" in start_schema["properties"]
+    assert "timeout_s" not in start_schema["required"]
     tree_schema = tools["list_directory_tree"].input_schema
     assert tree_schema["properties"]["depth"]["default"] == 2
     assert tree_schema["properties"]["include_hidden"]["default"] is False

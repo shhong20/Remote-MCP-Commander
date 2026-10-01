@@ -26,6 +26,7 @@ class CommandRequest(BaseModel):
     argv: list[CommandArg] = Field(min_length=1, max_length=64)
     cwd: str | None = Field(default=None, min_length=1, max_length=4096)
     env: CommandEnv = Field(default_factory=dict, max_length=32)
+    timeout_s: float | None = Field(default=None, ge=0.1, le=60.0)
 
 
 class CommandResult(BaseModel):
@@ -77,6 +78,7 @@ class ExecuteBody(BaseModel):
     argv: list[CommandArg] = Field(min_length=1, max_length=64)
     cwd: str | None = Field(default=None, min_length=1, max_length=4096)
     env: CommandEnv = Field(default_factory=dict, max_length=32)
+    timeout_s: float | None = Field(default=None, ge=0.1, le=60.0)
 
 
 class AgentInfo(BaseModel):
@@ -916,6 +918,7 @@ class RuntimeSessionInfo(BaseModel):
     executable: str = ""
     state: CommandSessionState
     cwd: str | None = None
+    timeout_s: float | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
     returncode: int | None = None
@@ -954,6 +957,7 @@ class CommandSessionStartRequest(BaseModel):
     argv: list[CommandArg] = Field(min_length=1, max_length=64)
     cwd: str | None = Field(default=None, min_length=1, max_length=4096)
     env: CommandEnv = Field(default_factory=dict, max_length=32)
+    timeout_s: float | None = Field(default=None, ge=1.0, le=3600.0)
 
 
 class CommandSessionStatusRequest(BaseModel):
@@ -1021,6 +1025,7 @@ class CommandSessionSnapshot(BaseModel):
     executable: str = ""
     state: CommandSessionState
     cwd: str | None = None
+    timeout_s: float | None = None
     started_at: datetime | None = None
     finished_at: datetime | None = None
     returncode: int | None = None
@@ -1060,6 +1065,7 @@ class CommandSessionStartBody(BaseModel):
     argv: list[CommandArg] = Field(min_length=1, max_length=64)
     cwd: str | None = Field(default=None, min_length=1, max_length=4096)
     env: CommandEnv = Field(default_factory=dict, max_length=32)
+    timeout_s: float | None = Field(default=None, ge=1.0, le=3600.0)
 
 
 class CommandSessionInputBody(BaseModel):

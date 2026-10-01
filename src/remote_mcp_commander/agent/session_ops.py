@@ -33,6 +33,7 @@ class _CommandSession:
     process: asyncio.subprocess.Process
     started_at: datetime
     cwd: str | None = None
+    timeout_s: float = 300.0
     state: CommandSessionState = "running"
     finished_at: datetime | None = None
     returncode: int | None = None
@@ -81,6 +82,7 @@ class CommandSessionManager:
             executable=session.executable,
             state=session.state,
             cwd=session.cwd,
+            timeout_s=session.timeout_s,
             started_at=session.started_at,
             finished_at=session.finished_at,
             returncode=session.returncode,
@@ -121,6 +123,7 @@ class CommandSessionManager:
         *,
         cwd: str | None = None,
         env_overrides: dict[str, str] | None = None,
+        timeout_s: float | None = None,
     ) -> CommandSessionSnapshot:
         policy_error = validate_generic_argv(argv, mode=self.policy_mode)
         if policy_error is not None:
@@ -140,6 +143,9 @@ class CommandSessionManager:
                 f"executable not found in trusted path: {executable}",
             )
         try:
+            if timeout_s is not None and not 1.0 <= timeout_s <= 3600.0:
+                raise ValueError("session timeout must be between 1 and 3600 seconds")
+            effective_timeout = timeout_s or self.timeout_s
             resolved_cwd = resolve_allowed_directory(cwd, self.roots) if cwd is not None else None
             process_env = merge_command_env(
                 self.child_env,
@@ -186,6 +192,7 @@ class CommandSessionManager:
                 process=process,
                 started_at=datetime.now(UTC),
                 cwd=str(resolved_cwd) if resolved_cwd is not None else None,
+                timeout_s=effective_timeout,
             )
             self._sessions[session_id] = session
             session.task = asyncio.create_task(self._run(session))
@@ -268,7 +275,7 @@ class CommandSessionManager:
         terminal_state: CommandSessionState = "failed"
         terminal_error: str | None = None
         try:
-            await asyncio.wait_for(session.process.wait(), timeout=self.timeout_s)
+            await asyncio.wait_for(session.process.wait(), timeout=session.timeout_s)
             session.returncode = session.process.returncode
             if session.cancel_requested:
                 terminal_state = "cancelled"
@@ -374,6 +381,7 @@ class CommandSessionManager:
                 executable=session.executable,
                 state=session.state,
                 cwd=session.cwd,
+                timeout_s=session.timeout_s,
                 started_at=session.started_at,
                 finished_at=session.finished_at,
                 returncode=session.returncode,

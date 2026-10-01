@@ -353,3 +353,18 @@ async def test_cancel_uses_process_group_termination_helper(
     result = await manager.cancel("cancel", session_id)
     assert result.state == "cancelled"
     assert called == 1
+
+
+@pytest.mark.asyncio
+async def test_command_session_timeout_override_is_applied(tmp_path: Path) -> None:
+    make_fake_uptime(tmp_path, "import time\ntime.sleep(0.1)\nprint('done')\n")
+    manager = make_manager(timeout_s=0.05, exec_search_path=str(tmp_path))
+    session_id = "9" * 32
+    started = await manager.start(
+        "start", session_id, ["uptime"], timeout_s=1.0
+    )
+    assert started.timeout_s == 1.0
+    result = await wait_terminal(manager, session_id)
+    assert result.state == "completed"
+    assert result.timeout_s == 1.0
+    assert result.stdout.strip() == "done"
