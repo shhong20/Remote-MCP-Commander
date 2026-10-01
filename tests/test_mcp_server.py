@@ -24,6 +24,7 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
     names = {tool.name for tool in result.tools}
     assert names == {
         "list_devices",
+        "list_commands",
         "device_info",
         "ping_device",
         "system_health",
@@ -334,3 +335,12 @@ async def test_signal_session_schema_is_session_bound() -> None:
     assert set(schema["required"]) == {"agent_id", "session_id", "kind", "signal"}
     assert "pid" not in schema["properties"]
     assert "approval_id" not in schema["properties"]
+
+
+@pytest.mark.asyncio
+async def test_list_commands_schema_requires_only_agent_id() -> None:
+    server = build_mcp(make_settings())
+    async with Client(server) as client:
+        result = await client.list_tools()
+    tool = next(item for item in result.tools if item.name == "list_commands")
+    assert set(tool.input_schema["required"]) == {"agent_id"}

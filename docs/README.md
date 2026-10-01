@@ -35,3 +35,4 @@
 - [Runtime session process identity](session-process-identity.md)
 - [Direct process metadata lookup](process-info.md)
 - [Runtime session signals](session-signal.md)
+- [Command discovery](command-discovery.md)

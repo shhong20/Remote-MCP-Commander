@@ -1055,3 +1055,28 @@ async def test_signal_session_client_sends_session_bound_payload() -> None:
     assert seen[0].url.path.endswith(f"/sessions/{session_id}/signal")
     assert b'"kind":"command"' in seen[0].content
     assert b'"signal":"int"' in seen[0].content
+
+
+@pytest.mark.asyncio
+async def test_list_commands_client_uses_discovery_route() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "commands",
+                "operation_mode": "personal",
+                "generic_available": ["bash", "git"],
+                "generic_unavailable": ["rg"],
+                "pty_available": ["bash"],
+                "pty_unavailable": [],
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    result = await client.list_commands("server-01")
+    assert result.generic_available == ["bash", "git"]
+    assert seen[0].method == "GET"
+    assert seen[0].url.path.endswith("/commands/discovery")

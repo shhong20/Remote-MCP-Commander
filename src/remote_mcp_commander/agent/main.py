@@ -8,7 +8,7 @@ import socket
 import websockets
 
 from remote_mcp_commander import __version__
-from remote_mcp_commander.agent.capabilities import detect_capabilities
+from remote_mcp_commander.agent.capabilities import detect_capabilities, discover_commands
 from remote_mcp_commander.agent.diagnostics import lookup_port, service_logs, system_health
 from remote_mcp_commander.agent.edit_ops import edit_text_file
 from remote_mcp_commander.agent.file_ops import (
@@ -51,6 +51,7 @@ from remote_mcp_commander.protocol import (
     PROTOCOL_MAX_SUPPORTED,
     PROTOCOL_MIN_SUPPORTED,
     AgentHello,
+    CommandDiscoveryRequest,
     CommandRequest,
     CommandSessionCancelRequest,
     CommandSessionDiscardRequest,
@@ -695,6 +696,12 @@ async def agent_loop() -> None:
                                 request.action,
                                 settings.exec_timeout_s,
                             )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "command_discovery_request":
+                            request = CommandDiscoveryRequest.model_validate(payload)
+                            result = discover_commands(settings, request.request_id)
                             await websocket.send(result.model_dump_json())
                             continue
 

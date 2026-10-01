@@ -8,6 +8,7 @@ from remote_mcp_commander.config import Settings
 from remote_mcp_commander.protocol import (
     AgentInfo,
     AgentList,
+    CommandDiscoveryResult,
     CommandResult,
     CommandSessionDiscardResult,
     CommandSessionInputResult,
@@ -143,6 +144,12 @@ class GatewayClient:
             json_body={"path": path},
         )
         return GitStatusResult.model_validate(payload)
+
+    async def list_commands(self, agent_id: str) -> CommandDiscoveryResult:
+        payload = await self._request(
+            "GET", f"/api/v1/agents/{agent_id}/commands/discovery"
+        )
+        return CommandDiscoveryResult.model_validate(payload)
 
     async def execute(
         self,

@@ -20,6 +20,21 @@ CapabilityName = Annotated[
 ]
 
 
+class CommandDiscoveryRequest(BaseModel):
+    type: Literal["command_discovery_request"] = "command_discovery_request"
+    request_id: str
+
+
+class CommandDiscoveryResult(BaseModel):
+    type: Literal["command_discovery_result"] = "command_discovery_result"
+    request_id: str
+    operation_mode: Literal["hardened", "personal"]
+    generic_available: list[str] = Field(default_factory=list)
+    generic_unavailable: list[str] = Field(default_factory=list)
+    pty_available: list[str] = Field(default_factory=list)
+    pty_unavailable: list[str] = Field(default_factory=list)
+
+
 class CommandRequest(BaseModel):
     type: Literal["command_request"] = "command_request"
     request_id: str

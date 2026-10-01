@@ -12,8 +12,10 @@ from remote_mcp_commander.policy import (
     generic_executables_for_mode,
     resolve_generic_executable,
 )
+from remote_mcp_commander.protocol import CommandDiscoveryResult
 
 BASE_CAPABILITIES = {
+    "command.discovery",
     "device.ping",
     "diagnostics.system_health",
     "diagnostics.port_lookup",
@@ -98,3 +100,36 @@ def detect_capabilities(settings: Settings, roots: list[Path]) -> list[str]:
         capabilities.add("command.session_signal")
 
     return sorted(capabilities)
+
+
+def discover_commands(settings: Settings, request_id: str) -> CommandDiscoveryResult:
+    generic_profiles = sorted(
+        settings.executable_allowlist.intersection(
+            generic_executables_for_mode(settings.operation_mode)
+        )
+    )
+    generic_available: list[str] = []
+    generic_unavailable: list[str] = []
+    for name in generic_profiles:
+        target = resolve_generic_executable(name, search_path=settings.command_search_path)
+        (generic_available if target is not None else generic_unavailable).append(name)
+
+    pty_profiles = sorted(settings.pty_executable_allowlist)
+    pty_available: list[str] = []
+    pty_unavailable: list[str] = []
+    for name in pty_profiles:
+        target = (
+            resolve_pty_executable(name, search_path=settings.command_search_path)
+            if os.name == "posix"
+            else None
+        )
+        (pty_available if target is not None else pty_unavailable).append(name)
+
+    return CommandDiscoveryResult(
+        request_id=request_id,
+        operation_mode=settings.operation_mode,
+        generic_available=generic_available,
+        generic_unavailable=generic_unavailable,
+        pty_available=pty_available,
+        pty_unavailable=pty_unavailable,
+    )

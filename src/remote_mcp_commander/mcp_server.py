@@ -14,6 +14,7 @@ from remote_mcp_commander.gateway.client import GatewayClient
 from remote_mcp_commander.oauth import OAuthTokenVerifier
 from remote_mcp_commander.protocol import (
     AgentInfo,
+    CommandDiscoveryResult,
     CommandResult,
     CommandSessionDiscardResult,
     CommandSessionInputResult,
@@ -143,6 +144,11 @@ def build_mcp(settings: Settings) -> MCPServer:
     async def git_status(agent_id: str, path: str) -> GitStatusResult:
         """Read bounded porcelain-v2 status for a normal Git repo inside Agent allowed roots."""
         return await GatewayClient(settings).git_status(agent_id, path)
+
+    @server.tool()
+    async def list_commands(agent_id: str) -> CommandDiscoveryResult:
+        """List command profiles that are currently resolvable on the Agent."""
+        return await GatewayClient(settings).list_commands(agent_id)
 
     @server.tool()
     async def execute(
