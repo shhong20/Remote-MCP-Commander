@@ -27,3 +27,4 @@
 - [Structured file append](file-append.md)
 - [Line-based text file reads](line-file-read.md)
 - [Command session stdin](command-session-stdin.md)
+- [Per-command timeout overrides](per-command-timeouts.md)

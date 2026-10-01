@@ -253,6 +253,7 @@ async def agent_loop() -> None:
                                 request.argv,
                                 cwd=request.cwd,
                                 env_overrides=request.env,
+                                timeout_s=request.timeout_s,
                             )
                             await websocket.send(result.model_dump_json())
                             continue

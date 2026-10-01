@@ -67,7 +67,7 @@ class OneShotCommandDispatcher:
             request.request_id,
             request.argv,
             allowlist=self.allowlist,
-            timeout_s=self.timeout_s,
+            timeout_s=request.timeout_s or self.timeout_s,
             max_output_bytes=self.max_output_bytes,
             exec_search_path=self.exec_search_path,
             policy_mode=self.policy_mode,

@@ -597,6 +597,8 @@ async def execute(agent_id: str, body: ExecuteBody, settings: SettingsDep) -> Co
         require_agent_capability(connection, "command.cwd")
     if body.env:
         require_agent_capability(connection, "command.env")
+    if body.timeout_s is not None:
+        require_agent_capability(connection, "command.timeout")
     request_id = uuid.uuid4().hex
     future = pending_request(connection, request_id)
     audit(
@@ -607,14 +609,19 @@ async def execute(agent_id: str, body: ExecuteBody, settings: SettingsDep) -> Co
         argc=len(body.argv),
         cwd=body.cwd,
         env_keys=sorted(body.env),
+        timeout_s=body.timeout_s,
     )
 
     try:
         request = CommandRequest(
-            request_id=request_id, argv=body.argv, cwd=body.cwd, env=body.env
+            request_id=request_id, argv=body.argv, cwd=body.cwd, env=body.env,
+            timeout_s=body.timeout_s,
         )
         await connection.websocket.send_text(request.model_dump_json())
-        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        effective_timeout = body.timeout_s or settings.exec_timeout_s
+        reply = await asyncio.wait_for(
+            future, timeout=max(settings.request_timeout_s, effective_timeout + 5.0)
+        )
         if not isinstance(reply, CommandResult):
             raise HTTPException(status_code=502, detail="unexpected agent response")
         audit(
@@ -687,6 +694,8 @@ async def start_command_session(
         require_agent_capability(connection, "command.cwd")
     if body.env:
         require_agent_capability(connection, "command.env")
+    if body.timeout_s is not None:
+        require_agent_capability(connection, "command.timeout")
     request_id = uuid.uuid4().hex
     session_id = uuid.uuid4().hex
     future = pending_request(connection, request_id)
@@ -698,6 +707,7 @@ async def start_command_session(
         argc=len(body.argv),
         cwd=body.cwd,
         env_keys=sorted(body.env),
+        timeout_s=body.timeout_s,
     )
     try:
         request = CommandSessionStartRequest(
@@ -706,6 +716,7 @@ async def start_command_session(
             argv=body.argv,
             cwd=body.cwd,
             env=body.env,
+            timeout_s=body.timeout_s,
         )
         await connection.websocket.send_text(request.model_dump_json())
         reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)

@@ -873,3 +873,32 @@ async def test_command_stdin_client_uses_input_and_close_routes() -> None:
     assert seen[0].url.path.endswith(f"/{session_id}/input")
     assert seen[0].content == b'{"data":"hello\\n"}'
     assert seen[1].url.path.endswith(f"/{session_id}/stdin/close")
+
+
+@pytest.mark.asyncio
+async def test_command_clients_send_timeout_overrides() -> None:
+    requests: list[httpx.Request] = []
+    session_id = "e" * 32
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request)
+        if request.url.path.endswith("/execute"):
+            return httpx.Response(200, json={"request_id": "e", "returncode": 0})
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "s",
+                "session_id": session_id,
+                "state": "running",
+                "timeout_s": 900.0,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    await client.execute("server-01", ["echo", "ok"], timeout_s=30.0)
+    result = await client.start_command_session(
+        "server-01", ["echo", "ok"], timeout_s=900.0
+    )
+    assert result.timeout_s == 900.0
+    assert b'"timeout_s":30.0' in requests[0].content
+    assert b'"timeout_s":900.0' in requests[1].content

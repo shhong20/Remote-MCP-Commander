@@ -74,12 +74,13 @@ class GatewayClient:
         path: str,
         *,
         json_body: dict[str, Any] | None = None,
+        timeout_s: float | None = None,
     ) -> Any:
         headers = {"Authorization": f"Bearer {self.settings.control_token}"}
         async with httpx.AsyncClient(
             base_url=self.settings.gateway_http,
             headers=headers,
-            timeout=self.settings.mcp_gateway_timeout_s,
+            timeout=timeout_s or self.settings.mcp_gateway_timeout_s,
             transport=self.transport,
         ) as client:
             response = await client.request(method, path, json=json_body)
@@ -145,11 +146,18 @@ class GatewayClient:
         *,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
+        timeout_s: float | None = None,
     ) -> CommandResult:
         payload = await self._request(
             "POST",
             f"/api/v1/agents/{agent_id}/execute",
-            json_body={"argv": argv, "cwd": cwd, "env": env or {}},
+            json_body={
+                "argv": argv, "cwd": cwd, "env": env or {}, "timeout_s": timeout_s,
+            },
+            timeout_s=max(
+                self.settings.mcp_gateway_timeout_s,
+                (timeout_s or self.settings.exec_timeout_s) + 5.0,
+            ),
         )
         return CommandResult.model_validate(payload)
 
@@ -160,11 +168,14 @@ class GatewayClient:
         *,
         cwd: str | None = None,
         env: dict[str, str] | None = None,
+        timeout_s: float | None = None,
     ) -> CommandSessionSnapshot:
         payload = await self._request(
             "POST",
             f"/api/v1/agents/{agent_id}/commands/sessions",
-            json_body={"argv": argv, "cwd": cwd, "env": env or {}},
+            json_body={
+                "argv": argv, "cwd": cwd, "env": env or {}, "timeout_s": timeout_s,
+            },
         )
         return CommandSessionSnapshot.model_validate(payload)
 

@@ -95,3 +95,28 @@ async def test_cancel_all_cancels_active_execute(monkeypatch) -> None:
     await dispatcher.cancel_all()
     assert cancelled.is_set()
     assert dispatcher.active_count == 0
+
+
+@pytest.mark.asyncio
+async def test_dispatcher_passes_request_timeout_override(monkeypatch) -> None:
+    observed: list[float] = []
+    sent: list[str] = []
+
+    async def capture_execute(request_id: str, argv: list[str], **kwargs) -> CommandResult:
+        observed.append(kwargs["timeout_s"])
+        return CommandResult(request_id=request_id, returncode=0)
+
+    async def send_text(payload: str) -> None:
+        sent.append(payload)
+
+    monkeypatch.setattr(one_shot, "execute_argv", capture_execute)
+    dispatcher = make_dispatcher()
+    await dispatcher.submit(
+        CommandRequest(request_id="timeout", argv=["echo"], timeout_s=17.5), send_text
+    )
+    for _ in range(10):
+        await asyncio.sleep(0)
+        if dispatcher.active_count == 0:
+            break
+    assert observed == [17.5]
+    assert len(sent) == 1
