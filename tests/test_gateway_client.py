@@ -902,3 +902,36 @@ async def test_command_clients_send_timeout_overrides() -> None:
     assert result.timeout_s == 900.0
     assert b'"timeout_s":30.0' in requests[0].content
     assert b'"timeout_s":900.0' in requests[1].content
+
+
+@pytest.mark.asyncio
+async def test_command_output_lines_client_sends_line_cursor_payload() -> None:
+    seen: list[httpx.Request] = []
+    session_id = "ab" * 16
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "lines",
+                "session_id": session_id,
+                "state": "completed",
+                "stream": "stderr",
+                "content": "e2\ne3\n",
+                "total_lines": 3,
+                "start_line": 1,
+                "next_line": 3,
+                "eof": True,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    result = await client.command_session_output_lines(
+        "server-01", session_id, stream="stderr", offset=-2, max_lines=10
+    )
+    assert result.content == "e2\ne3\n"
+    assert seen[0].url.path.endswith(f"/commands/sessions/{session_id}/output/lines")
+    assert b'"stream":"stderr"' in seen[0].content
+    assert b'"offset":-2' in seen[0].content
+    assert b'"max_lines":10' in seen[0].content

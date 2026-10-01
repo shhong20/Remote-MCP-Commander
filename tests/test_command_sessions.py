@@ -368,3 +368,61 @@ async def test_command_session_timeout_override_is_applied(tmp_path: Path) -> No
     assert result.state == "completed"
     assert result.timeout_s == 1.0
     assert result.stdout.strip() == "done"
+
+
+@pytest.mark.asyncio
+async def test_command_output_lines_supports_range_tail_and_stderr(tmp_path: Path) -> None:
+    body = (
+        "import sys\n"
+        "sys.stdout.write('a\\nb\\nc')\n"
+        "sys.stderr.write('e1\\ne2\\n')\n"
+    )
+    make_fake_uptime(tmp_path, body)
+    manager = make_manager(exec_search_path=str(tmp_path))
+    session_id = "a1" * 16
+    await manager.start("start", session_id, ["uptime"])
+    result = await wait_terminal(manager, session_id)
+    assert result.state == "completed"
+
+    middle = await manager.output_lines(
+        "mid", session_id, stream="stdout", offset=1, max_lines=1
+    )
+    assert middle.content == "b\n"
+    assert (middle.total_lines, middle.start_line, middle.next_line) == (3, 1, 2)
+    assert middle.eof is False
+
+    tail = await manager.output_lines(
+        "tail", session_id, stream="stdout", offset=-2, max_lines=1
+    )
+    assert tail.content == "b\nc"
+    assert tail.eof is True
+    stderr = await manager.output_lines(
+        "err", session_id, stream="stderr", offset=0, max_lines=10
+    )
+    assert stderr.content == "e1\ne2\n"
+    assert stderr.eof is True
+
+
+@pytest.mark.asyncio
+async def test_running_command_output_lines_hides_partial_last_line(tmp_path: Path) -> None:
+    body = (
+        "import sys,time\n"
+        "sys.stdout.write('ready\\npartial')\n"
+        "sys.stdout.flush()\n"
+        "time.sleep(30)\n"
+    )
+    make_fake_uptime(tmp_path, body)
+    manager = make_manager(timeout_s=60.0, exec_search_path=str(tmp_path))
+    session_id = "a2" * 16
+    await manager.start("start", session_id, ["uptime"])
+
+    import asyncio
+    await asyncio.sleep(0.05)
+    page = await manager.output_lines(
+        "page", session_id, stream="stdout", offset=0, max_lines=10
+    )
+    assert page.content == "ready\n"
+    assert page.total_lines == 1
+    assert page.pending_partial is True
+    assert page.eof is False
+    await manager.cancel("cancel", session_id)

@@ -11,6 +11,7 @@ from remote_mcp_commander.protocol import (
     CommandResult,
     CommandSessionDiscardResult,
     CommandSessionInputResult,
+    CommandSessionLineOutput,
     CommandSessionOutput,
     CommandSessionSnapshot,
     CommandSessionStdinCloseResult,
@@ -258,6 +259,22 @@ class GatewayClient:
             },
         )
         return CommandSessionOutput.model_validate(payload)
+
+    async def command_session_output_lines(
+        self,
+        agent_id: str,
+        session_id: str,
+        *,
+        stream: str = "stdout",
+        offset: int = 0,
+        max_lines: int = 200,
+    ) -> CommandSessionLineOutput:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/commands/sessions/{session_id}/output/lines",
+            json_body={"stream": stream, "offset": offset, "max_lines": max_lines},
+        )
+        return CommandSessionLineOutput.model_validate(payload)
 
     async def discard_command_session(
         self,

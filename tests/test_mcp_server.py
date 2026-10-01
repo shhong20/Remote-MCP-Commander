@@ -65,6 +65,7 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "write_command_input",
         "close_command_stdin",
         "command_output",
+        "command_output_lines",
         "discard_command",
         "start_pty",
         "pty_status",
@@ -182,6 +183,11 @@ async def test_command_session_tools_use_structured_contracts() -> None:
     assert output_properties["stdout_offset"]["default"] == 0
     assert output_properties["stderr_offset"]["default"] == 0
     assert output_properties["max_chars"]["default"] == 8192
+    line_schema = tools["command_output_lines"].input_schema
+    assert set(line_schema["required"]) == {"agent_id", "session_id"}
+    assert line_schema["properties"]["stream"]["default"] == "stdout"
+    assert line_schema["properties"]["offset"]["default"] == 0
+    assert line_schema["properties"]["max_lines"]["default"] == 200
     assert set(tools["discard_command"].input_schema["required"]) == {
         "agent_id",
         "session_id",

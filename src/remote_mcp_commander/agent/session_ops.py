@@ -18,6 +18,7 @@ from remote_mcp_commander.policy import (
 from remote_mcp_commander.protocol import (
     CommandSessionDiscardResult,
     CommandSessionInputResult,
+    CommandSessionLineOutput,
     CommandSessionOutput,
     CommandSessionSnapshot,
     CommandSessionState,
@@ -439,6 +440,54 @@ class CommandSessionManager:
             next_stderr_offset=stderr_offset + len(stderr),
             stdout_truncated=session.stdout_truncated,
             stderr_truncated=session.stderr_truncated,
+            error=session.error,
+        )
+
+    async def output_lines(
+        self,
+        request_id: str,
+        session_id: str,
+        *,
+        stream: str,
+        offset: int,
+        max_lines: int,
+    ) -> CommandSessionLineOutput:
+        session = self._sessions.get(session_id)
+        if session is None:
+            return CommandSessionLineOutput(
+                request_id=request_id, session_id=session_id, state="failed",
+                stream=stream, rejected=True, error="session not found",
+            )
+        text = session.stdout if stream == "stdout" else session.stderr
+        truncated = session.stdout_truncated if stream == "stdout" else session.stderr_truncated
+        pending_partial = (
+            session.state == "running"
+            and bool(text)
+            and not text.endswith(("\n", "\r"))
+        )
+        lines = text.splitlines(keepends=True)
+        if pending_partial and lines:
+            lines = lines[:-1]
+        total = len(lines)
+        if offset < 0:
+            start = max(0, total + offset)
+            selected = lines[start:]
+        else:
+            start = min(offset, total)
+            selected = lines[start : start + max_lines]
+        next_line = start + len(selected)
+        return CommandSessionLineOutput(
+            request_id=request_id,
+            session_id=session_id,
+            state=session.state,
+            stream=stream,
+            content="".join(selected),
+            total_lines=total,
+            start_line=start,
+            next_line=next_line,
+            eof=session.state != "running" and next_line >= total,
+            pending_partial=pending_partial,
+            output_truncated=truncated,
             error=session.error,
         )
 

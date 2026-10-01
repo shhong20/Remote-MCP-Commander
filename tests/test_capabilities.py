@@ -69,6 +69,7 @@ def test_capabilities_reflect_available_tools_and_allowed_roots(
         "command.session",
         "command.stdin",
         "command.timeout",
+        "command.output_lines",
         "command.session_list",
     }
     assert result == sorted(expected)

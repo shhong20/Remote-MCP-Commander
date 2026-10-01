@@ -52,6 +52,7 @@ from remote_mcp_commander.protocol import (
     CommandSessionCancelRequest,
     CommandSessionDiscardRequest,
     CommandSessionInputRequest,
+    CommandSessionLineOutputRequest,
     CommandSessionOutputRequest,
     CommandSessionStartRequest,
     CommandSessionStatusRequest,
@@ -294,6 +295,18 @@ async def agent_loop() -> None:
                                 stdout_offset=request.stdout_offset,
                                 stderr_offset=request.stderr_offset,
                                 max_chars=request.max_chars,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "command_session_line_output_request":
+                            request = CommandSessionLineOutputRequest.model_validate(payload)
+                            result = await sessions.output_lines(
+                                request.request_id,
+                                request.session_id,
+                                stream=request.stream,
+                                offset=request.offset,
+                                max_lines=request.max_lines,
                             )
                             await websocket.send(result.model_dump_json())
                             continue

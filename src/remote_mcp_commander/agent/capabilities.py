@@ -67,7 +67,13 @@ def detect_capabilities(settings: Settings, roots: list[Path]) -> list[str]:
         for name in configured
     ):
         capabilities.update(
-            {"command.execute", "command.session", "command.stdin", "command.timeout"}
+            {
+                "command.execute",
+                "command.session",
+                "command.stdin",
+                "command.timeout",
+                "command.output_lines",
+            }
         )
 
     if os.name == "posix" and any(

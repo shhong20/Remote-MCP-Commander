@@ -981,6 +981,18 @@ class CommandSessionOutputRequest(BaseModel):
     max_chars: int = Field(default=8192, ge=1, le=65_536)
 
 
+CommandOutputStream = Literal["stdout", "stderr"]
+
+
+class CommandSessionLineOutputRequest(BaseModel):
+    type: Literal["command_session_line_output_request"] = "command_session_line_output_request"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    stream: CommandOutputStream = "stdout"
+    offset: int = Field(default=0, ge=-1000)
+    max_lines: int = Field(default=200, ge=1, le=1000)
+
+
 class CommandSessionInputRequest(BaseModel):
     type: Literal["command_session_input_request"] = "command_session_input_request"
     request_id: str
@@ -1052,6 +1064,23 @@ class CommandSessionOutput(BaseModel):
     error: str | None = None
 
 
+class CommandSessionLineOutput(BaseModel):
+    type: Literal["command_session_line_output"] = "command_session_line_output"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    state: CommandSessionState
+    stream: CommandOutputStream = "stdout"
+    content: str = ""
+    total_lines: int = 0
+    start_line: int = 0
+    next_line: int = 0
+    eof: bool = False
+    pending_partial: bool = False
+    output_truncated: bool = False
+    rejected: bool = False
+    error: str | None = None
+
+
 class CommandSessionDiscardResult(BaseModel):
     type: Literal["command_session_discard_result"] = "command_session_discard_result"
     request_id: str
@@ -1066,6 +1095,12 @@ class CommandSessionStartBody(BaseModel):
     cwd: str | None = Field(default=None, min_length=1, max_length=4096)
     env: CommandEnv = Field(default_factory=dict, max_length=32)
     timeout_s: float | None = Field(default=None, ge=1.0, le=3600.0)
+
+
+class CommandSessionLineOutputBody(BaseModel):
+    stream: CommandOutputStream = "stdout"
+    offset: int = Field(default=0, ge=-1000)
+    max_lines: int = Field(default=200, ge=1, le=1000)
 
 
 class CommandSessionInputBody(BaseModel):
