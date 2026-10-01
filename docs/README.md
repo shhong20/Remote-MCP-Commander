@@ -34,3 +34,4 @@
 - [Output line long polling](output-line-long-poll.md)
 - [Runtime session process identity](session-process-identity.md)
 - [Direct process metadata lookup](process-info.md)
+- [Runtime session signals](session-signal.md)

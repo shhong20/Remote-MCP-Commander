@@ -11,7 +11,7 @@ from pathlib import Path
 from remote_mcp_commander.agent.env_policy import merge_command_env
 from remote_mcp_commander.agent.file_ops import resolve_allowed_directory
 from remote_mcp_commander.agent.output_lines import wait_for_line_page
-from remote_mcp_commander.agent.system_ops import process_create_time_ms
+from remote_mcp_commander.agent.system_ops import process_create_time_ms, process_signal_value
 from remote_mcp_commander.policy import (
     TRUSTED_GENERIC_EXEC_PATH,
     resolve_generic_executable,
@@ -25,7 +25,9 @@ from remote_mcp_commander.protocol import (
     CommandSessionSnapshot,
     CommandSessionState,
     CommandSessionStdinCloseResult,
+    ProcessSignal,
     RuntimeSessionInfo,
+    SessionSignalResult,
 )
 
 
@@ -502,6 +504,63 @@ class CommandSessionManager:
             waited_ms=waited_ms,
             wait_timed_out=wait_timed_out,
             error=session.error,
+        )
+
+    async def signal_session(
+        self, request_id: str, session_id: str, requested_signal: ProcessSignal
+    ) -> SessionSignalResult:
+        session = self._sessions.get(session_id)
+        if session is None:
+            return SessionSignalResult(
+                request_id=request_id, session_id=session_id, kind="command",
+                signal=requested_signal, rejected=True, error="session not found",
+            )
+        if session.state != "running" or session.process.returncode is not None:
+            return SessionSignalResult(
+                request_id=request_id, session_id=session_id, kind="command",
+                signal=requested_signal, pid=session.process.pid,
+                create_time_ms=session.create_time_ms, rejected=True,
+                error="session is not running",
+            )
+        actual_create_time_ms = process_create_time_ms(session.process.pid)
+        if session.create_time_ms is None or actual_create_time_ms != session.create_time_ms:
+            return SessionSignalResult(
+                request_id=request_id, session_id=session_id, kind="command",
+                signal=requested_signal, pid=session.process.pid,
+                create_time_ms=session.create_time_ms, rejected=True,
+                error="session process identity changed or is unreadable",
+            )
+        signal_value = process_signal_value(requested_signal)
+        if signal_value is None:
+            return SessionSignalResult(
+                request_id=request_id, session_id=session_id, kind="command",
+                signal=requested_signal, pid=session.process.pid,
+                create_time_ms=session.create_time_ms, rejected=True,
+                error=f"signal is unavailable on this platform: {requested_signal}",
+            )
+        try:
+            if os.name == "posix":
+                os.killpg(session.process.pid, signal_value)
+            else:
+                session.process.send_signal(signal_value)
+        except ProcessLookupError:
+            return SessionSignalResult(
+                request_id=request_id, session_id=session_id, kind="command",
+                signal=requested_signal, pid=session.process.pid,
+                create_time_ms=session.create_time_ms, rejected=True,
+                error="session process no longer exists",
+            )
+        except PermissionError:
+            return SessionSignalResult(
+                request_id=request_id, session_id=session_id, kind="command",
+                signal=requested_signal, pid=session.process.pid,
+                create_time_ms=session.create_time_ms, rejected=True,
+                error="permission denied",
+            )
+        return SessionSignalResult(
+            request_id=request_id, session_id=session_id, kind="command",
+            signal=requested_signal, pid=session.process.pid,
+            create_time_ms=session.create_time_ms, signal_sent=True,
         )
 
     async def cancel(self, request_id: str, session_id: str) -> CommandSessionSnapshot:

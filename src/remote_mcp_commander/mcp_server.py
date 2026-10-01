@@ -52,11 +52,13 @@ from remote_mcp_commander.protocol import (
     PtySessionResizeResult,
     PtySessionSnapshot,
     RuntimeSessionFilter,
+    RuntimeSessionKind,
     ServiceAction,
     ServiceActionResult,
     ServiceLogsResult,
     ServiceStatusResult,
     SessionListResult,
+    SessionSignalResult,
     SystemHealthResult,
     TreeInspectResult,
     TreeMutationResult,
@@ -181,6 +183,18 @@ def build_mcp(settings: Settings) -> MCPServer:
             kind=kind,
             include_completed=include_completed,
             limit=limit,
+        )
+
+    @server.tool()
+    async def signal_session(
+        agent_id: str,
+        session_id: str,
+        kind: RuntimeSessionKind,
+        signal: ProcessSignal,
+    ) -> SessionSignalResult:
+        """Send a bounded signal to a managed command or PTY session in Personal mode."""
+        return await GatewayClient(settings).signal_session(
+            agent_id, session_id, kind=kind, requested_signal=signal
         )
 
     @server.tool()

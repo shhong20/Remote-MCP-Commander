@@ -324,3 +324,30 @@ async def test_pty_session_exposes_stable_process_identity(tmp_path: Path) -> No
         started.pid,
         started.create_time_ms,
     )
+
+
+@pytest.mark.asyncio
+async def test_pty_session_signal_rechecks_identity_and_targets_group(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    make_fake_terminal(tmp_path, "import time\ntime.sleep(30)\n")
+    manager = make_manager(timeout_s=60.0, exec_search_path=str(tmp_path))
+    session_id = "f2" * 16
+    started = await manager.start(
+        "start", session_id, ["terminal"], columns=80, rows=24
+    )
+    assert started.pid is not None
+    assert started.create_time_ms is not None
+
+    seen: list[tuple[int, int]] = []
+    monkeypatch.setattr(
+        "remote_mcp_commander.agent.pty_ops.os.killpg",
+        lambda pid, sig: seen.append((pid, sig)),
+    )
+    result = await manager.signal_session("signal", session_id, "hup")
+    assert result.signal_sent is True
+    assert result.pid == started.pid
+    assert result.create_time_ms == started.create_time_ms
+    assert seen and seen[0][0] == started.pid
+    monkeypatch.undo()
+    await manager.cancel("cancel", session_id)

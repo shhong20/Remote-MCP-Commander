@@ -90,4 +90,11 @@ def detect_capabilities(settings: Settings, roots: list[Path]) -> list[str]:
     if {"command.session", "command.pty"}.intersection(capabilities):
         capabilities.add("command.session_list")
 
+    if (
+        settings.personal_mode
+        and not settings.personal_process_approval_required
+        and {"command.session", "command.pty"}.intersection(capabilities)
+    ):
+        capabilities.add("command.session_signal")
+
     return sorted(capabilities)

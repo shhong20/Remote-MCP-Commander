@@ -998,6 +998,32 @@ class SessionListBody(BaseModel):
     limit: int = Field(default=100, ge=1, le=200)
 
 
+class SessionSignalRequest(BaseModel):
+    type: Literal["session_signal_request"] = "session_signal_request"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    kind: RuntimeSessionKind
+    signal: ProcessSignal
+
+
+class SessionSignalResult(BaseModel):
+    type: Literal["session_signal_result"] = "session_signal_result"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    kind: RuntimeSessionKind
+    signal: ProcessSignal
+    pid: int | None = None
+    create_time_ms: int | None = None
+    signal_sent: bool = False
+    rejected: bool = False
+    error: str | None = None
+
+
+class SessionSignalBody(BaseModel):
+    kind: RuntimeSessionKind
+    signal: ProcessSignal
+
+
 class CommandSessionStartRequest(BaseModel):
     type: Literal["command_session_start_request"] = "command_session_start_request"
     request_id: str

@@ -1025,3 +1025,33 @@ async def test_process_info_client_sends_exact_pid() -> None:
     assert result.process.pid == 4242
     assert seen[0].url.path.endswith("/processes/info")
     assert b'"pid":4242' in seen[0].content
+
+
+@pytest.mark.asyncio
+async def test_signal_session_client_sends_session_bound_payload() -> None:
+    seen: list[httpx.Request] = []
+    session_id = "de" * 16
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "session-signal",
+                "session_id": session_id,
+                "kind": "command",
+                "signal": "int",
+                "pid": 123,
+                "create_time_ms": 456789,
+                "signal_sent": True,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    result = await client.signal_session(
+        "server-01", session_id, kind="command", requested_signal="int"
+    )
+    assert result.signal_sent is True
+    assert seen[0].url.path.endswith(f"/sessions/{session_id}/signal")
+    assert b'"kind":"command"' in seen[0].content
+    assert b'"signal":"int"' in seen[0].content
