@@ -31,3 +31,4 @@
 - [Command output line pagination](command-output-lines.md)
 - [PTY output line pagination](pty-output-lines.md)
 - [Large-file tail reads](large-file-tail.md)
+- [Output line long polling](output-line-long-poll.md)

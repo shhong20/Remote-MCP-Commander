@@ -82,3 +82,52 @@ async def test_gateway_rejects_command_line_output_without_capability() -> None:
 
     assert exc_info.value.status_code == 409
     assert websocket.payloads == []
+
+
+@pytest.mark.asyncio
+async def test_gateway_requires_wait_capability_only_for_long_poll() -> None:
+    websocket = FakeLineOutputWebSocket()
+    connection = gateway.AgentConnection(websocket=websocket)  # type: ignore[arg-type]
+    connection.capabilities = ["command.output_lines"]
+    gateway.connections["server-01"] = connection
+    session_id = "de" * 16
+    try:
+        immediate = await gateway.get_command_session_output_lines(
+            "server-01",
+            session_id,
+            CommandSessionLineOutputBody(wait_ms=0),
+            make_settings(),
+        )
+        with pytest.raises(HTTPException) as exc_info:
+            await gateway.get_command_session_output_lines(
+                "server-01",
+                session_id,
+                CommandSessionLineOutputBody(wait_ms=250),
+                make_settings(),
+            )
+    finally:
+        gateway.connections.pop("server-01", None)
+
+    assert immediate.content == "line\n"
+    assert exc_info.value.status_code == 409
+    assert len(websocket.payloads) == 1
+
+@pytest.mark.asyncio
+async def test_gateway_dispatches_command_line_wait_when_supported() -> None:
+    websocket = FakeLineOutputWebSocket()
+    connection = gateway.AgentConnection(websocket=websocket)  # type: ignore[arg-type]
+    connection.capabilities = ["command.output_lines", "command.output_wait"]
+    gateway.connections["server-01"] = connection
+    session_id = "df" * 16
+    try:
+        result = await gateway.get_command_session_output_lines(
+            "server-01",
+            session_id,
+            CommandSessionLineOutputBody(wait_ms=250),
+            make_settings(),
+        )
+    finally:
+        gateway.connections.pop("server-01", None)
+
+    assert result.content == "line\n"
+    assert websocket.payloads[0]["wait_ms"] == 250

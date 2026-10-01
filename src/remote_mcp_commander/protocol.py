@@ -1019,6 +1019,7 @@ class CommandSessionLineOutputRequest(BaseModel):
     stream: CommandOutputStream = "stdout"
     offset: int = Field(default=0, ge=-1000)
     max_lines: int = Field(default=200, ge=1, le=1000)
+    wait_ms: int = Field(default=0, ge=0, le=10_000)
 
 
 class CommandSessionInputRequest(BaseModel):
@@ -1105,6 +1106,8 @@ class CommandSessionLineOutput(BaseModel):
     eof: bool = False
     pending_partial: bool = False
     output_truncated: bool = False
+    waited_ms: int = Field(default=0, ge=0)
+    wait_timed_out: bool = False
     rejected: bool = False
     error: str | None = None
 
@@ -1129,6 +1132,7 @@ class CommandSessionLineOutputBody(BaseModel):
     stream: CommandOutputStream = "stdout"
     offset: int = Field(default=0, ge=-1000)
     max_lines: int = Field(default=200, ge=1, le=1000)
+    wait_ms: int = Field(default=0, ge=0, le=10_000)
 
 
 class CommandSessionInputBody(BaseModel):
@@ -1193,6 +1197,7 @@ class PtySessionLineOutputRequest(BaseModel):
     session_id: str = Field(pattern=SESSION_ID_PATTERN)
     offset: int = Field(default=0, ge=-1000)
     max_lines: int = Field(default=200, ge=1, le=1000)
+    wait_ms: int = Field(default=0, ge=0, le=10_000)
 
 
 class PtySessionDiscardRequest(BaseModel):
@@ -1243,6 +1248,8 @@ class PtySessionLineOutput(BaseModel):
     eof: bool = False
     pending_partial: bool = False
     output_truncated: bool = False
+    waited_ms: int = Field(default=0, ge=0)
+    wait_timed_out: bool = False
     rejected: bool = False
     error: str | None = None
 
@@ -1302,3 +1309,4 @@ class PtySessionOutputBody(BaseModel):
 class PtySessionLineOutputBody(BaseModel):
     offset: int = Field(default=0, ge=-1000)
     max_lines: int = Field(default=200, ge=1, le=1000)
+    wait_ms: int = Field(default=0, ge=0, le=10_000)

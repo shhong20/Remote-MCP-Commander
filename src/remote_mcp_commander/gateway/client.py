@@ -270,11 +270,15 @@ class GatewayClient:
         stream: str = "stdout",
         offset: int = 0,
         max_lines: int = 200,
+        wait_ms: int = 0,
     ) -> CommandSessionLineOutput:
         payload = await self._request(
             "POST",
             f"/api/v1/agents/{agent_id}/commands/sessions/{session_id}/output/lines",
-            json_body={"stream": stream, "offset": offset, "max_lines": max_lines},
+            json_body={
+                "stream": stream, "offset": offset, "max_lines": max_lines, "wait_ms": wait_ms
+            },
+            timeout_s=max(self.settings.mcp_gateway_timeout_s, wait_ms / 1000.0 + 3.0),
         )
         return CommandSessionLineOutput.model_validate(payload)
 
@@ -362,11 +366,13 @@ class GatewayClient:
         *,
         offset: int = 0,
         max_lines: int = 200,
+        wait_ms: int = 0,
     ) -> PtySessionLineOutput:
         payload = await self._request(
             "POST",
             f"/api/v1/agents/{agent_id}/pty/sessions/{session_id}/output/lines",
-            json_body={"offset": offset, "max_lines": max_lines},
+            json_body={"offset": offset, "max_lines": max_lines, "wait_ms": wait_ms},
+            timeout_s=max(self.settings.mcp_gateway_timeout_s, wait_ms / 1000.0 + 3.0),
         )
         return PtySessionLineOutput.model_validate(payload)
 

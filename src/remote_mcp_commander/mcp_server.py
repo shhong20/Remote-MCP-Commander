@@ -230,10 +230,12 @@ def build_mcp(settings: Settings) -> MCPServer:
         stream: str = "stdout",
         offset: int = 0,
         max_lines: int = 200,
+        wait_ms: int = 0,
     ) -> CommandSessionLineOutput:
-        """Read command output by stable line ranges or tail semantics."""
+        """Read command output by line range/tail, optionally waiting for new stable lines."""
         return await GatewayClient(settings).command_session_output_lines(
-            agent_id, session_id, stream=stream, offset=offset, max_lines=max_lines
+            agent_id, session_id, stream=stream, offset=offset,
+            max_lines=max_lines, wait_ms=wait_ms
         )
 
     @server.tool()
@@ -301,10 +303,11 @@ def build_mcp(settings: Settings) -> MCPServer:
         session_id: str,
         offset: int = 0,
         max_lines: int = 200,
+        wait_ms: int = 0,
     ) -> PtySessionLineOutput:
-        """Read PTY output by stable LF-delimited line ranges or tail semantics."""
+        """Read PTY output by line range/tail, optionally waiting for new stable lines."""
         return await GatewayClient(settings).pty_session_output_lines(
-            agent_id, session_id, offset=offset, max_lines=max_lines
+            agent_id, session_id, offset=offset, max_lines=max_lines, wait_ms=wait_ms
         )
 
     @server.tool()

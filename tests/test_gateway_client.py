@@ -928,13 +928,14 @@ async def test_command_output_lines_client_sends_line_cursor_payload() -> None:
 
     client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
     result = await client.command_session_output_lines(
-        "server-01", session_id, stream="stderr", offset=-2, max_lines=10
+        "server-01", session_id, stream="stderr", offset=-2, max_lines=10, wait_ms=250
     )
     assert result.content == "e2\ne3\n"
     assert seen[0].url.path.endswith(f"/commands/sessions/{session_id}/output/lines")
     assert b'"stream":"stderr"' in seen[0].content
     assert b'"offset":-2' in seen[0].content
     assert b'"max_lines":10' in seen[0].content
+    assert b'"wait_ms":250' in seen[0].content
 
 
 @pytest.mark.asyncio
@@ -960,12 +961,13 @@ async def test_pty_output_lines_client_sends_line_cursor_payload() -> None:
 
     client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
     result = await client.pty_session_output_lines(
-        "server-01", session_id, offset=-2, max_lines=9
+        "server-01", session_id, offset=-2, max_lines=9, wait_ms=300
     )
     assert result.content == "two\nthree\n"
     assert seen[0].url.path.endswith(f"/pty/sessions/{session_id}/output/lines")
     assert b'"offset":-2' in seen[0].content
     assert b'"max_lines":9' in seen[0].content
+    assert b'"wait_ms":300' in seen[0].content
 
 
 @pytest.mark.asyncio

@@ -7,13 +7,13 @@ import os
 import shutil
 import signal
 import struct
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 
 from remote_mcp_commander.agent.env_policy import merge_command_env
 from remote_mcp_commander.agent.file_ops import resolve_allowed_directory
-from remote_mcp_commander.agent.output_lines import paginate_lines
+from remote_mcp_commander.agent.output_lines import wait_for_line_page
 from remote_mcp_commander.policy import TRUSTED_GENERIC_EXEC_PATH, validate_pty_argv
 from remote_mcp_commander.protocol import (
     CommandSessionState,
@@ -45,6 +45,7 @@ class _PtySession:
     error: str | None = None
     cancel_requested: bool = False
     task: asyncio.Task[None] | None = None
+    output_event: asyncio.Event = field(default_factory=asyncio.Event)
 
 
 def resolve_pty_executable(name: str, *, search_path: str) -> str | None:
@@ -265,9 +266,14 @@ class PtySessionManager:
             if accepted:
                 session.output += decoder.decode(accepted, final=False)
                 retained_bytes += len(accepted)
+                session.output_event.set()
             if len(chunk) > remaining:
                 session.output_truncated = True
-        session.output += decoder.decode(b"", final=True)
+                session.output_event.set()
+        tail = decoder.decode(b"", final=True)
+        if tail:
+            session.output += tail
+            session.output_event.set()
 
     async def _terminate(self, session: _PtySession) -> None:
         if session.process.returncode is not None:
@@ -329,6 +335,7 @@ class PtySessionManager:
             session.state = terminal_state
             session.error = terminal_error
             session.finished_at = datetime.now(UTC)
+            session.output_event.set()
 
     async def list_infos(self, *, include_completed: bool) -> list[RuntimeSessionInfo]:
         sessions = list(self._sessions.values())
@@ -390,7 +397,13 @@ class PtySessionManager:
         )
 
     async def output_lines(
-        self, request_id: str, session_id: str, *, offset: int, max_lines: int
+        self,
+        request_id: str,
+        session_id: str,
+        *,
+        offset: int,
+        max_lines: int,
+        wait_ms: int = 0,
     ) -> PtySessionLineOutput:
         session = self._sessions.get(session_id)
         if session is None:
@@ -401,11 +414,14 @@ class PtySessionManager:
                 rejected=True,
                 error="PTY session not found",
             )
-        page = paginate_lines(
-            session.output,
-            running=session.state == "running",
+        page, waited_ms, wait_timed_out = await wait_for_line_page(
+            lambda: session.output,
+            lambda: session.state == "running",
+            lambda: not session.output_truncated,
+            session.output_event,
             offset=offset,
             max_lines=max_lines,
+            wait_ms=wait_ms,
         )
         return PtySessionLineOutput(
             request_id=request_id,
@@ -418,6 +434,8 @@ class PtySessionManager:
             eof=page.eof,
             pending_partial=page.pending_partial,
             output_truncated=session.output_truncated,
+            waited_ms=waited_ms,
+            wait_timed_out=wait_timed_out,
             error=session.error,
         )
 
