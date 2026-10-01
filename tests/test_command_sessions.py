@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import psutil
 import pytest
 
 from remote_mcp_commander.agent.session_ops import CommandSessionManager
@@ -535,3 +536,28 @@ async def test_command_line_long_poll_returns_immediately_when_output_is_capped(
     assert page.wait_timed_out is False
     assert page.waited_ms < 100
     await manager.cancel("cancel", session_id)
+
+@pytest.mark.asyncio
+async def test_command_session_exposes_stable_process_identity(tmp_path: Path) -> None:
+    make_fake_uptime(tmp_path, "import time\ntime.sleep(0.2)\n")
+    manager = make_manager(exec_search_path=str(tmp_path))
+    session_id = "b1" * 16
+
+    started = await manager.start("start", session_id, ["uptime"])
+    assert started.pid is not None
+    assert started.create_time_ms == round(psutil.Process(started.pid).create_time() * 1000)
+
+    active = await manager.list_infos(include_completed=False)
+    assert len(active) == 1
+    assert (active[0].pid, active[0].create_time_ms) == (
+        started.pid,
+        started.create_time_ms,
+    )
+
+    terminal = await wait_terminal(manager, session_id)
+    assert terminal.state == "completed"
+    retained = await manager.list_infos(include_completed=True)
+    assert (retained[0].pid, retained[0].create_time_ms) == (
+        started.pid,
+        started.create_time_ms,
+    )

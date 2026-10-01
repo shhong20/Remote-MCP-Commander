@@ -22,6 +22,13 @@ from remote_mcp_commander.protocol import (
 SERVICE_UNIT_RE = re.compile(r"^[A-Za-z0-9_.@:-]{1,256}$")
 
 
+def process_create_time_ms(pid: int) -> int | None:
+    try:
+        return round(psutil.Process(pid).create_time() * 1000)
+    except (psutil.AccessDenied, psutil.NoSuchProcess, psutil.ZombieProcess):
+        return None
+
+
 def _list_processes_sync(request_id: str, limit: int) -> ProcessListResult:
     processes: list[ProcessInfo] = []
     for process in psutil.process_iter(attrs=["pid", "name", "username", "status", "memory_info"]):

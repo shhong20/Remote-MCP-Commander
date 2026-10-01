@@ -32,3 +32,4 @@
 - [PTY output line pagination](pty-output-lines.md)
 - [Large-file tail reads](large-file-tail.md)
 - [Output line long polling](output-line-long-poll.md)
+- [Runtime session process identity](session-process-identity.md)

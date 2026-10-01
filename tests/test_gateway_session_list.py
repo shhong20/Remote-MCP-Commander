@@ -28,6 +28,8 @@ class FakeSessionListWebSocket:
                         session_id="a" * 32,
                         kind="command",
                         executable="pytest",
+                        pid=4321,
+                        create_time_ms=123456789,
                         state="running",
                         output_chars=12,
                     )
@@ -64,6 +66,8 @@ async def test_gateway_lists_runtime_sessions_with_capability(
 
     assert result.total_count == 1
     assert result.sessions[0].executable == "pytest"
+    assert result.sessions[0].pid == 4321
+    assert result.sessions[0].create_time_ms == 123456789
     assert websocket.payloads[0]["type"] == "session_list_request"
     assert websocket.payloads[0]["kind"] == "command"
     assert websocket.payloads[0]["include_completed"] is True

@@ -14,6 +14,7 @@ from pathlib import Path
 from remote_mcp_commander.agent.env_policy import merge_command_env
 from remote_mcp_commander.agent.file_ops import resolve_allowed_directory
 from remote_mcp_commander.agent.output_lines import wait_for_line_page
+from remote_mcp_commander.agent.system_ops import process_create_time_ms
 from remote_mcp_commander.policy import TRUSTED_GENERIC_EXEC_PATH, validate_pty_argv
 from remote_mcp_commander.protocol import (
     CommandSessionState,
@@ -36,6 +37,7 @@ class _PtySession:
     columns: int
     rows: int
     started_at: datetime
+    create_time_ms: int | None = None
     cwd: str | None = None
     state: CommandSessionState = "running"
     finished_at: datetime | None = None
@@ -107,6 +109,8 @@ class PtySessionManager:
             request_id=request_id,
             session_id=session.session_id,
             executable=session.executable,
+            pid=session.process.pid,
+            create_time_ms=session.create_time_ms,
             state=session.state,
             cwd=session.cwd,
             columns=session.columns,
@@ -226,6 +230,7 @@ class PtySessionManager:
                 columns=columns,
                 rows=rows,
                 started_at=datetime.now(UTC),
+                create_time_ms=process_create_time_ms(process.pid),
                 cwd=str(resolved_cwd) if resolved_cwd is not None else None,
             )
             self._sessions[session_id] = session
@@ -346,6 +351,8 @@ class PtySessionManager:
                 session_id=session.session_id,
                 kind="pty",
                 executable=session.executable,
+                pid=session.process.pid,
+                create_time_ms=session.create_time_ms,
                 state=session.state,
                 cwd=session.cwd,
                 started_at=session.started_at,

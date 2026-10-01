@@ -944,6 +944,8 @@ class RuntimeSessionInfo(BaseModel):
     session_id: str = Field(pattern=SESSION_ID_PATTERN)
     kind: RuntimeSessionKind
     executable: str = ""
+    pid: int | None = None
+    create_time_ms: int | None = None
     state: CommandSessionState
     cwd: str | None = None
     timeout_s: float | None = None
@@ -1064,6 +1066,8 @@ class CommandSessionSnapshot(BaseModel):
     request_id: str
     session_id: str = Field(pattern=SESSION_ID_PATTERN)
     executable: str = ""
+    pid: int | None = None
+    create_time_ms: int | None = None
     state: CommandSessionState
     cwd: str | None = None
     timeout_s: float | None = None
@@ -1211,6 +1215,8 @@ class PtySessionSnapshot(BaseModel):
     request_id: str
     session_id: str = Field(pattern=SESSION_ID_PATTERN)
     executable: str = ""
+    pid: int | None = None
+    create_time_ms: int | None = None
     state: CommandSessionState
     cwd: str | None = None
     columns: int = 80
