@@ -50,6 +50,8 @@ from remote_mcp_commander.protocol import (
     ApprovalTicket,
     AuditQueryResult,
     AuditVerificationResult,
+    CommandDiscoveryRequest,
+    CommandDiscoveryResult,
     CommandRequest,
     CommandResult,
     CommandSessionCancelRequest,
@@ -193,6 +195,7 @@ from remote_mcp_commander.protocol import (
 
 AgentReply = (
     CommandResult
+    | CommandDiscoveryResult
     | PingResult
     | FileReadResult
     | FileLineReadResult
@@ -601,6 +604,34 @@ async def get_agent(agent_id: str) -> AgentInfo:
     if connection is None:
         raise HTTPException(status_code=404, detail="agent not connected")
     return agent_info(agent_id, connection)
+
+
+@app.get(
+    "/api/v1/agents/{agent_id}/commands/discovery",
+    dependencies=[Depends(require_control_token)],
+)
+async def discover_agent_commands(
+    agent_id: str, settings: SettingsDep
+) -> CommandDiscoveryResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "command.discovery")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = CommandDiscoveryRequest(request_id=request_id)
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, CommandDiscoveryResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent command discovery timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
 
 
 @app.post(
@@ -2719,6 +2750,8 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
 
             if message_type == "command_result":
                 reply: AgentReply = CommandResult.model_validate(payload)
+            elif message_type == "command_discovery_result":
+                reply = CommandDiscoveryResult.model_validate(payload)
             elif message_type == "command_session_snapshot":
                 reply = CommandSessionSnapshot.model_validate(payload)
             elif message_type == "command_session_output":
