@@ -7,7 +7,12 @@ from pydantic import ValidationError
 from starlette.websockets import WebSocketDisconnect
 
 from remote_mcp_commander.gateway import app as gateway
-from remote_mcp_commander.protocol import AgentHello
+from remote_mcp_commander.protocol import (
+    AgentHello,
+    CommandSessionSnapshot,
+    PtySessionSnapshot,
+    RuntimeSessionInfo,
+)
 
 
 class FakeWebSocket:
@@ -129,3 +134,32 @@ async def test_valid_hello_replaces_existing_agent_only_after_validation(monkeyp
     assert old_socket.close_calls == [(4000, "replaced by newer agent connection")]
     assert new_socket.accepted is True
     assert "server-01" not in gateway.connections
+
+
+def test_session_process_identity_fields_are_backward_compatible() -> None:
+    runtime = RuntimeSessionInfo.model_validate(
+        {
+            "session_id": "a" * 32,
+            "kind": "command",
+            "executable": "pytest",
+            "state": "running",
+        }
+    )
+    command = CommandSessionSnapshot.model_validate(
+        {
+            "request_id": "legacy",
+            "session_id": "b" * 32,
+            "state": "completed",
+        }
+    )
+    pty = PtySessionSnapshot.model_validate(
+        {
+            "request_id": "legacy",
+            "session_id": "c" * 32,
+            "state": "completed",
+        }
+    )
+
+    assert runtime.pid is None and runtime.create_time_ms is None
+    assert command.pid is None and command.create_time_ms is None
+    assert pty.pid is None and pty.create_time_ms is None

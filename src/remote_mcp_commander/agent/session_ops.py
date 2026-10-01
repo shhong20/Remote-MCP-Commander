@@ -11,6 +11,7 @@ from pathlib import Path
 from remote_mcp_commander.agent.env_policy import merge_command_env
 from remote_mcp_commander.agent.file_ops import resolve_allowed_directory
 from remote_mcp_commander.agent.output_lines import wait_for_line_page
+from remote_mcp_commander.agent.system_ops import process_create_time_ms
 from remote_mcp_commander.policy import (
     TRUSTED_GENERIC_EXEC_PATH,
     resolve_generic_executable,
@@ -34,6 +35,7 @@ class _CommandSession:
     executable: str
     process: asyncio.subprocess.Process
     started_at: datetime
+    create_time_ms: int | None = None
     cwd: str | None = None
     timeout_s: float = 300.0
     state: CommandSessionState = "running"
@@ -84,6 +86,8 @@ class CommandSessionManager:
             request_id=request_id,
             session_id=session.session_id,
             executable=session.executable,
+            pid=session.process.pid,
+            create_time_ms=session.create_time_ms,
             state=session.state,
             cwd=session.cwd,
             timeout_s=session.timeout_s,
@@ -195,6 +199,7 @@ class CommandSessionManager:
                 executable=executable,
                 process=process,
                 started_at=datetime.now(UTC),
+                create_time_ms=process_create_time_ms(process.pid),
                 cwd=str(resolved_cwd) if resolved_cwd is not None else None,
                 timeout_s=effective_timeout,
             )
@@ -389,6 +394,8 @@ class CommandSessionManager:
                 session_id=session.session_id,
                 kind="command",
                 executable=session.executable,
+                pid=session.process.pid,
+                create_time_ms=session.create_time_ms,
                 state=session.state,
                 cwd=session.cwd,
                 timeout_s=session.timeout_s,

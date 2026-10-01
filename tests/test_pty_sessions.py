@@ -2,6 +2,7 @@ import asyncio
 import os
 from pathlib import Path
 
+import psutil
 import pytest
 
 from remote_mcp_commander.agent.pty_ops import PtySessionManager
@@ -298,3 +299,28 @@ async def test_pty_line_long_poll_times_out_on_partial_line(tmp_path: Path) -> N
     assert page.wait_timed_out is True
     assert page.waited_ms >= 50
     await manager.cancel("cancel", session_id)
+
+@pytest.mark.asyncio
+async def test_pty_session_exposes_stable_process_identity(tmp_path: Path) -> None:
+    make_fake_terminal(tmp_path, "import time\ntime.sleep(0.2)\n")
+    manager = make_manager(exec_search_path=str(tmp_path))
+    session_id = "b2" * 16
+
+    started = await manager.start("start", session_id, ["terminal"], columns=80, rows=24)
+    assert started.pid is not None
+    assert started.create_time_ms == round(psutil.Process(started.pid).create_time() * 1000)
+
+    active = await manager.list_infos(include_completed=False)
+    assert len(active) == 1
+    assert (active[0].pid, active[0].create_time_ms) == (
+        started.pid,
+        started.create_time_ms,
+    )
+
+    terminal = await wait_terminal(manager, session_id)
+    assert terminal.state == "completed"
+    retained = await manager.list_infos(include_completed=True)
+    assert (retained[0].pid, retained[0].create_time_ms) == (
+        started.pid,
+        started.create_time_ms,
+    )
