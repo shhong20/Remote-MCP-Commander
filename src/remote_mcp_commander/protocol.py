@@ -488,6 +488,53 @@ class PdfComposeBody(BaseModel):
         return self
 
 
+class PdfRenderRequest(BaseModel):
+    type: Literal["pdf_render_request"] = "pdf_render_request"
+    request_id: str
+    output_path: str = Field(min_length=1, max_length=4096)
+    markdown: str = Field(min_length=1, max_length=262_144)
+    overwrite: bool = False
+    expected_sha256: str | None = Field(
+        default=None, min_length=64, max_length=64, pattern=r"^[a-f0-9]{64}$"
+    )
+
+    @model_validator(mode="after")
+    def validate_overwrite_guard(self) -> PdfRenderRequest:
+        if self.overwrite and self.expected_sha256 is None:
+            raise ValueError("expected_sha256 is required when overwriting PDF output")
+        if not self.overwrite and self.expected_sha256 is not None:
+            raise ValueError("expected_sha256 requires overwrite=true")
+        return self
+
+
+class PdfRenderResult(BaseModel):
+    type: Literal["pdf_render_result"] = "pdf_render_result"
+    request_id: str
+    output_path: str = ""
+    pages_written: int = 0
+    bytes_written: int = 0
+    sha256: str | None = None
+    rejected: bool = False
+    error: str | None = None
+
+
+class PdfRenderBody(BaseModel):
+    output_path: str = Field(min_length=1, max_length=4096)
+    markdown: str = Field(min_length=1, max_length=262_144)
+    overwrite: bool = False
+    expected_sha256: str | None = Field(
+        default=None, min_length=64, max_length=64, pattern=r"^[a-f0-9]{64}$"
+    )
+
+    @model_validator(mode="after")
+    def validate_overwrite_guard(self) -> PdfRenderBody:
+        if self.overwrite and self.expected_sha256 is None:
+            raise ValueError("expected_sha256 is required when overwriting PDF output")
+        if not self.overwrite and self.expected_sha256 is not None:
+            raise ValueError("expected_sha256 requires overwrite=true")
+        return self
+
+
 SpreadsheetCellString = Annotated[str, Field(max_length=512)]
 SpreadsheetInteger = Annotated[
     StrictInt, Field(ge=-1_000_000_000_000_000, le=1_000_000_000_000_000)

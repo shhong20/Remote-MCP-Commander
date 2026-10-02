@@ -4,7 +4,13 @@ import pytest
 
 from remote_mcp_commander.config import Settings
 from remote_mcp_commander.gateway import app as gateway
-from remote_mcp_commander.protocol import PdfComposeBody, PdfComposeResult, PdfPageSource
+from remote_mcp_commander.protocol import (
+    PdfComposeBody,
+    PdfComposeResult,
+    PdfPageSource,
+    PdfRenderBody,
+    PdfRenderResult,
+)
 
 
 class FakePdfWebSocket:
@@ -94,3 +100,79 @@ async def test_gateway_pdf_compose_audit_omits_source_details_and_sha(
     assert "aaaaaaaaaaaaaaaa" not in audit_text
     assert "pdf_compose_requested" in audit_text
     assert "pdf_compose" in audit_text
+
+
+class FakePdfRenderWebSocket:
+    def __init__(self) -> None:
+        self.payloads: list[dict[str, object]] = []
+
+    async def send_text(self, raw: str) -> None:
+        payload = json.loads(raw)
+        self.payloads.append(payload)
+        connection = gateway.connections["server-01"]
+        connection.pending[payload["request_id"]].set_result(
+            PdfRenderResult(
+                request_id=payload["request_id"],
+                output_path=payload["output_path"],
+                pages_written=1,
+                bytes_written=2048,
+                sha256="2" * 64,
+            )
+        )
+
+
+@pytest.mark.asyncio
+async def test_gateway_pdf_render_requires_audit_before_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    websocket = FakePdfRenderWebSocket()
+    connection = gateway.AgentConnection(websocket=websocket)  # type: ignore[arg-type]
+    connection.capabilities = ["pdf.render"]
+    gateway.connections["server-01"] = connection
+    monkeypatch.setattr(
+        gateway,
+        "audit_required",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("audit unavailable")),
+    )
+    body = PdfRenderBody(output_path="/srv/result.pdf", markdown="# private title")
+    try:
+        with pytest.raises(RuntimeError, match="audit unavailable"):
+            await gateway.render_agent_pdf("server-01", body, make_settings())
+    finally:
+        gateway.connections.pop("server-01", None)
+    assert websocket.payloads == []
+
+
+@pytest.mark.asyncio
+async def test_gateway_pdf_render_audit_omits_markdown_and_sha(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    websocket = FakePdfRenderWebSocket()
+    connection = gateway.AgentConnection(websocket=websocket)  # type: ignore[arg-type]
+    connection.capabilities = ["pdf.render"]
+    gateway.connections["server-01"] = connection
+    events: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(
+        gateway,
+        "audit_required",
+        lambda event, **fields: events.append((event, fields)),
+    )
+    monkeypatch.setattr(gateway, "audit", lambda event, **fields: events.append((event, fields)))
+    body = PdfRenderBody(
+        output_path="/srv/result.pdf",
+        markdown="# private-title-should-not-be-audited",
+        overwrite=True,
+        expected_sha256="a" * 64,
+    )
+    try:
+        result = await gateway.render_agent_pdf("server-01", body, make_settings())
+    finally:
+        gateway.connections.pop("server-01", None)
+
+    assert result.pages_written == 1
+    assert websocket.payloads[0]["type"] == "pdf_render_request"
+    audit_text = str(events)
+    assert "private-title-should-not-be-audited" not in audit_text
+    assert "aaaaaaaaaaaaaaaa" not in audit_text
+    assert "pdf_render_requested" in audit_text
+    assert "pdf_render" in audit_text

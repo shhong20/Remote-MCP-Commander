@@ -24,6 +24,11 @@ BASE_CAPABILITIES = {
     "process.terminate",
     "process.signal",
 }
+PDF_RENDER_PATH = Path("/usr/bin/soffice")
+
+
+def _pdf_render_available() -> bool:
+    return PDF_RENDER_PATH.is_file() and os.access(PDF_RENDER_PATH, os.X_OK)
 
 
 def detect_capabilities(settings: Settings, roots: list[Path]) -> list[str]:
@@ -63,6 +68,8 @@ def detect_capabilities(settings: Settings, roots: list[Path]) -> list[str]:
                 "command.cwd",
             }
         )
+        if _pdf_render_available():
+            capabilities.add("pdf.render")
         if settings.operation_mode == "personal":
             capabilities.update({"filesystem.mutate", "filesystem.tree_mutate"})
         if shutil.which("git", path=TRUSTED_GIT_PATH) is not None:

@@ -71,6 +71,7 @@ from remote_mcp_commander.protocol import (
     PathMutationResult,
     PdfComposeResult,
     PdfPageSource,
+    PdfRenderResult,
     PingResponse,
     PortLookupResult,
     ProcessInfoResult,
@@ -850,6 +851,26 @@ def build_mcp(settings: Settings) -> MCPServer:
             agent_id,
             output_path,
             sources,
+            overwrite=overwrite,
+            expected_sha256=expected_sha256,
+        )
+
+    @server.tool()
+    async def create_pdf_from_markdown(
+        agent_id: str,
+        output_path: Annotated[str, Field(min_length=1, max_length=4096)],
+        markdown: Annotated[str, Field(min_length=1, max_length=262_144)],
+        overwrite: bool = False,
+        expected_sha256: Annotated[
+            str | None,
+            Field(default=None, min_length=64, max_length=64, pattern=r"^[a-f0-9]{64}$"),
+        ] = None,
+    ) -> PdfRenderResult:
+        """Create a bounded local PDF from a safe Markdown subset."""
+        return await GatewayClient(settings).render_pdf_from_markdown(
+            agent_id,
+            output_path,
+            markdown,
             overwrite=overwrite,
             expected_sha256=expected_sha256,
         )

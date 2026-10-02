@@ -1541,6 +1541,38 @@ async def test_xlsx_edit_client_rejects_oversized_utf8_payload_before_http() -> 
 
 
 @pytest.mark.asyncio
+async def test_pdf_render_client_uses_structured_route() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "render",
+                "output_path": "/home/ubuntu/rendered.pdf",
+                "pages_written": 2,
+                "bytes_written": 8192,
+                "sha256": "b" * 64,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    result = await client.render_pdf_from_markdown(
+        "server-01",
+        "/home/ubuntu/rendered.pdf",
+        "# 제목\n\n본문",
+    )
+
+    assert result.pages_written == 2
+    assert seen[0].method == "POST"
+    assert seen[0].url.path.endswith("/pdf/render")
+    assert b'"output_path":"/home/ubuntu/rendered.pdf"' in seen[0].content
+    assert "제목" in seen[0].content.decode("utf-8")
+    assert b'"overwrite":false' in seen[0].content
+
+
+@pytest.mark.asyncio
 async def test_pdf_compose_client_uses_structured_route() -> None:
     seen: list[httpx.Request] = []
 
