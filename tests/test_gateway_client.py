@@ -1103,3 +1103,38 @@ async def test_list_commands_client_uses_discovery_route() -> None:
     assert result.generic_available == ["bash", "git"]
     assert seen[0].method == "GET"
     assert seen[0].url.path.endswith("/commands/discovery")
+
+
+@pytest.mark.asyncio
+async def test_preview_document_client_sends_range_options() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "preview",
+                "path": "/home/ubuntu/sample.xlsx",
+                "kind": "xlsx",
+                "content": "7\n",
+                "sheet": "Data",
+                "cell_range": "B1:B1",
+                "rows_returned": 1,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    result = await client.preview_document(
+        "server-01",
+        "/home/ubuntu/sample.xlsx",
+        sheet="Data",
+        cell_range="B1:B1",
+        max_rows=1,
+    )
+    assert result.cell_range == "B1:B1"
+    assert result.rows_returned == 1
+    assert seen[0].url.path.endswith("/documents/preview")
+    assert b'"sheet":"Data"' in seen[0].content
+    assert b'"cell_range":"B1:B1"' in seen[0].content
+    assert b'"max_rows":1' in seen[0].content

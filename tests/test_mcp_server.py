@@ -109,6 +109,8 @@ async def test_execute_schema_requires_structured_argv() -> None:
     assert set(preview_schema["required"]) == {"agent_id", "path"}
     assert preview_schema["properties"]["page"]["default"] == 1
     assert preview_schema["properties"]["max_pages"]["default"] == 5
+    assert preview_schema["properties"]["cell_range"]["default"] is None
+    assert "cell_range" not in preview_schema.get("required", [])
     assert preview_schema["properties"]["max_rows"]["default"] == 200
 
     batch_schema = next(
