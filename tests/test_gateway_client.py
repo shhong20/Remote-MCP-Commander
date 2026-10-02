@@ -1605,3 +1605,44 @@ async def test_pdf_compose_client_uses_structured_route() -> None:
     assert b'"start_page":2' in seen[0].content
     assert b'"end_page":4' in seen[0].content
     assert b'"overwrite":false' in seen[0].content
+
+
+@pytest.mark.asyncio
+async def test_pdf_rewrite_client_uses_structured_route() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "rewrite",
+                "output_path": "/home/ubuntu/rewritten.pdf",
+                "pages_written": 3,
+                "bytes_written": 8192,
+                "sha256": "c" * 64,
+            },
+        )
+
+    from remote_mcp_commander.protocol import PdfMarkdownSegment, PdfSourcePagesSegment
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    result = await client.rewrite_pdf_with_markdown(
+        "server-01",
+        "/home/ubuntu/source.pdf",
+        "/home/ubuntu/rewritten.pdf",
+        [
+            PdfSourcePagesSegment(start_page=1, end_page=1),
+            PdfMarkdownSegment(markdown="# Insert"),
+            PdfSourcePagesSegment(start_page=3, end_page=3),
+        ],
+        expected_source_sha256="a" * 64,
+    )
+
+    assert result.pages_written == 3
+    assert seen[0].method == "POST"
+    assert seen[0].url.path.endswith("/pdf/rewrite")
+    body = seen[0].content.decode("utf-8")
+    assert '"source_path":"/home/ubuntu/source.pdf"' in body
+    assert '"kind":"markdown"' in body
+    assert '"expected_source_sha256":"aaaaaaaaaaaaaaaa' in body

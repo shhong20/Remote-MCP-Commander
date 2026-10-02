@@ -7,9 +7,13 @@ from remote_mcp_commander.gateway import app as gateway
 from remote_mcp_commander.protocol import (
     PdfComposeBody,
     PdfComposeResult,
+    PdfMarkdownSegment,
     PdfPageSource,
     PdfRenderBody,
     PdfRenderResult,
+    PdfRewriteBody,
+    PdfRewriteResult,
+    PdfSourcePagesSegment,
 )
 
 
@@ -176,3 +180,89 @@ async def test_gateway_pdf_render_audit_omits_markdown_and_sha(
     assert "aaaaaaaaaaaaaaaa" not in audit_text
     assert "pdf_render_requested" in audit_text
     assert "pdf_render" in audit_text
+
+
+class FakePdfRewriteWebSocket:
+    def __init__(self) -> None:
+        self.payloads: list[dict[str, object]] = []
+
+    async def send_text(self, raw: str) -> None:
+        payload = json.loads(raw)
+        self.payloads.append(payload)
+        connection = gateway.connections["server-01"]
+        connection.pending[payload["request_id"]].set_result(
+            PdfRewriteResult(
+                request_id=payload["request_id"],
+                output_path=payload["output_path"],
+                pages_written=3,
+                bytes_written=6144,
+                sha256="3" * 64,
+            )
+        )
+
+
+def make_rewrite_body() -> PdfRewriteBody:
+    return PdfRewriteBody(
+        source_path="/srv/private-source.pdf",
+        output_path="/srv/result.pdf",
+        segments=[
+            PdfSourcePagesSegment(start_page=1, end_page=1),
+            PdfMarkdownSegment(markdown="# private-markdown"),
+            PdfSourcePagesSegment(start_page=3, end_page=3),
+        ],
+        expected_source_sha256="a" * 64,
+    )
+
+
+@pytest.mark.asyncio
+async def test_gateway_pdf_rewrite_requires_audit_before_dispatch(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    websocket = FakePdfRewriteWebSocket()
+    connection = gateway.AgentConnection(websocket=websocket)  # type: ignore[arg-type]
+    connection.capabilities = ["pdf.rewrite"]
+    gateway.connections["server-01"] = connection
+    monkeypatch.setattr(
+        gateway,
+        "audit_required",
+        lambda *args, **kwargs: (_ for _ in ()).throw(RuntimeError("audit unavailable")),
+    )
+    try:
+        with pytest.raises(RuntimeError, match="audit unavailable"):
+            await gateway.rewrite_agent_pdf(
+                "server-01", make_rewrite_body(), make_settings()
+            )
+    finally:
+        gateway.connections.pop("server-01", None)
+    assert websocket.payloads == []
+
+
+@pytest.mark.asyncio
+async def test_gateway_pdf_rewrite_audit_omits_source_markdown_and_sha(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    websocket = FakePdfRewriteWebSocket()
+    connection = gateway.AgentConnection(websocket=websocket)  # type: ignore[arg-type]
+    connection.capabilities = ["pdf.rewrite"]
+    gateway.connections["server-01"] = connection
+    events: list[tuple[str, dict[str, object]]] = []
+    monkeypatch.setattr(
+        gateway,
+        "audit_required",
+        lambda event, **fields: events.append((event, fields)),
+    )
+    monkeypatch.setattr(gateway, "audit", lambda event, **fields: events.append((event, fields)))
+    body = make_rewrite_body()
+    try:
+        result = await gateway.rewrite_agent_pdf("server-01", body, make_settings())
+    finally:
+        gateway.connections.pop("server-01", None)
+
+    assert result.pages_written == 3
+    assert websocket.payloads[0]["type"] == "pdf_rewrite_request"
+    audit_text = str(events)
+    assert "/srv/private-source.pdf" not in audit_text
+    assert "private-markdown" not in audit_text
+    assert "aaaaaaaaaaaaaaaa" not in audit_text
+    assert "pdf_rewrite_requested" in audit_text
+    assert "pdf_rewrite" in audit_text

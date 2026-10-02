@@ -69,6 +69,7 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "edit_xlsx_range",
         "compose_pdf_pages",
         "create_pdf_from_markdown",
+        "rewrite_pdf_with_markdown",
         "preview_documents",
         "preview_image",
         "read_multiple_files",
@@ -229,6 +230,26 @@ async def test_execute_schema_requires_structured_argv() -> None:
         pdf_render_schema["properties"]["expected_sha256"]["anyOf"][0]["pattern"]
         == "^[a-f0-9]{64}$"
     )
+
+    pdf_rewrite_schema = next(
+        tool for tool in result.tools if tool.name == "rewrite_pdf_with_markdown"
+    ).input_schema
+    assert set(pdf_rewrite_schema["required"]) == {
+        "agent_id",
+        "source_path",
+        "output_path",
+        "segments",
+        "expected_source_sha256",
+    }
+    assert pdf_rewrite_schema["properties"]["segments"]["minItems"] == 1
+    assert pdf_rewrite_schema["properties"]["segments"]["maxItems"] == 32
+    assert pdf_rewrite_schema["properties"]["overwrite"]["default"] is False
+    assert pdf_rewrite_schema["properties"]["expected_output_sha256"]["default"] is None
+    source_segment = pdf_rewrite_schema["$defs"]["PdfSourcePagesSegment"]
+    markdown_segment = pdf_rewrite_schema["$defs"]["PdfMarkdownSegment"]
+    assert source_segment["properties"]["kind"]["const"] == "source_pages"
+    assert markdown_segment["properties"]["kind"]["const"] == "markdown"
+    assert markdown_segment["properties"]["markdown"]["maxLength"] == 131_072
 
     binary_read_schema = next(
         tool for tool in result.tools if tool.name == "read_binary"

@@ -49,6 +49,9 @@ from remote_mcp_commander.protocol import (
     PdfPageSource,
     PdfRenderBody,
     PdfRenderResult,
+    PdfRewriteBody,
+    PdfRewriteResult,
+    PdfRewriteSegment,
     PingResponse,
     PortLookupResult,
     ProcessInfoResult,
@@ -645,6 +648,33 @@ class GatewayClient:
             timeout_s=max(self.settings.mcp_gateway_timeout_s, 110.0),
         )
         return PdfRenderResult.model_validate(payload)
+
+    async def rewrite_pdf_with_markdown(
+        self,
+        agent_id: str,
+        source_path: str,
+        output_path: str,
+        segments: list[PdfRewriteSegment],
+        *,
+        expected_source_sha256: str,
+        overwrite: bool = False,
+        expected_output_sha256: str | None = None,
+    ) -> PdfRewriteResult:
+        body = PdfRewriteBody(
+            source_path=source_path,
+            output_path=output_path,
+            segments=segments,
+            expected_source_sha256=expected_source_sha256,
+            overwrite=overwrite,
+            expected_output_sha256=expected_output_sha256,
+        )
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/pdf/rewrite",
+            json_body=body.model_dump(),
+            timeout_s=max(self.settings.mcp_gateway_timeout_s, 140.0),
+        )
+        return PdfRewriteResult.model_validate(payload)
 
     async def preview_image(self, agent_id: str, path: str) -> ImagePreviewResult:
         payload = await self._request(

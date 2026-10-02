@@ -72,6 +72,8 @@ from remote_mcp_commander.protocol import (
     PdfComposeResult,
     PdfPageSource,
     PdfRenderResult,
+    PdfRewriteResult,
+    PdfRewriteSegment,
     PingResponse,
     PortLookupResult,
     ProcessInfoResult,
@@ -873,6 +875,32 @@ def build_mcp(settings: Settings) -> MCPServer:
             markdown,
             overwrite=overwrite,
             expected_sha256=expected_sha256,
+        )
+
+    @server.tool()
+    async def rewrite_pdf_with_markdown(
+        agent_id: str,
+        source_path: Annotated[str, Field(min_length=1, max_length=4096)],
+        output_path: Annotated[str, Field(min_length=1, max_length=4096)],
+        segments: Annotated[list[PdfRewriteSegment], Field(min_length=1, max_length=32)],
+        expected_source_sha256: Annotated[
+            str, Field(min_length=64, max_length=64, pattern=r"^[a-f0-9]{64}$")
+        ],
+        overwrite: bool = False,
+        expected_output_sha256: Annotated[
+            str | None,
+            Field(default=None, min_length=64, max_length=64, pattern=r"^[a-f0-9]{64}$"),
+        ] = None,
+    ) -> PdfRewriteResult:
+        """Rewrite one PDF by declaring source-page and Markdown segments in final order."""
+        return await GatewayClient(settings).rewrite_pdf_with_markdown(
+            agent_id,
+            source_path,
+            output_path,
+            segments,
+            expected_source_sha256=expected_source_sha256,
+            overwrite=overwrite,
+            expected_output_sha256=expected_output_sha256,
         )
 
     @server.tool()

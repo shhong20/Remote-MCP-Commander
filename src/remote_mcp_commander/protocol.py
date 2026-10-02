@@ -535,6 +535,101 @@ class PdfRenderBody(BaseModel):
         return self
 
 
+class PdfSourcePagesSegment(BaseModel):
+    kind: Literal["source_pages"] = "source_pages"
+    start_page: int = Field(default=1, ge=1, le=100_000)
+    end_page: int | None = Field(default=None, ge=1, le=100_000)
+
+    @model_validator(mode="after")
+    def validate_page_range(self) -> PdfSourcePagesSegment:
+        if self.end_page is not None and self.start_page > self.end_page:
+            raise ValueError("PDF source start_page must not exceed end_page")
+        return self
+
+
+class PdfMarkdownSegment(BaseModel):
+    kind: Literal["markdown"] = "markdown"
+    markdown: str = Field(min_length=1, max_length=131_072)
+
+
+PdfRewriteSegment = Annotated[
+    PdfSourcePagesSegment | PdfMarkdownSegment, Field(discriminator="kind")
+]
+
+
+def _validate_pdf_rewrite_segments(segments: list[PdfRewriteSegment]) -> None:
+    if not any(isinstance(segment, PdfSourcePagesSegment) for segment in segments):
+        raise ValueError("PDF rewrite requires at least one source_pages segment")
+    markdown_bytes = sum(
+        len(segment.markdown.encode("utf-8"))
+        for segment in segments
+        if isinstance(segment, PdfMarkdownSegment)
+    )
+    if markdown_bytes > 262_144:
+        raise ValueError("PDF rewrite Markdown input exceeds UTF-8 byte limit")
+
+
+class PdfRewriteRequest(BaseModel):
+    type: Literal["pdf_rewrite_request"] = "pdf_rewrite_request"
+    request_id: str
+    source_path: str = Field(min_length=1, max_length=4096)
+    output_path: str = Field(min_length=1, max_length=4096)
+    segments: list[PdfRewriteSegment] = Field(min_length=1, max_length=32)
+    expected_source_sha256: str = Field(
+        min_length=64, max_length=64, pattern=r"^[a-f0-9]{64}$"
+    )
+    overwrite: bool = False
+    expected_output_sha256: str | None = Field(
+        default=None, min_length=64, max_length=64, pattern=r"^[a-f0-9]{64}$"
+    )
+
+    @model_validator(mode="after")
+    def validate_rewrite(self) -> PdfRewriteRequest:
+        _validate_pdf_rewrite_segments(self.segments)
+        if self.overwrite and self.expected_output_sha256 is None:
+            raise ValueError(
+                "expected_output_sha256 is required when overwriting PDF output"
+            )
+        if not self.overwrite and self.expected_output_sha256 is not None:
+            raise ValueError("expected_output_sha256 requires overwrite=true")
+        return self
+
+
+class PdfRewriteResult(BaseModel):
+    type: Literal["pdf_rewrite_result"] = "pdf_rewrite_result"
+    request_id: str
+    output_path: str = ""
+    pages_written: int = 0
+    bytes_written: int = 0
+    sha256: str | None = None
+    rejected: bool = False
+    error: str | None = None
+
+
+class PdfRewriteBody(BaseModel):
+    source_path: str = Field(min_length=1, max_length=4096)
+    output_path: str = Field(min_length=1, max_length=4096)
+    segments: list[PdfRewriteSegment] = Field(min_length=1, max_length=32)
+    expected_source_sha256: str = Field(
+        min_length=64, max_length=64, pattern=r"^[a-f0-9]{64}$"
+    )
+    overwrite: bool = False
+    expected_output_sha256: str | None = Field(
+        default=None, min_length=64, max_length=64, pattern=r"^[a-f0-9]{64}$"
+    )
+
+    @model_validator(mode="after")
+    def validate_rewrite(self) -> PdfRewriteBody:
+        _validate_pdf_rewrite_segments(self.segments)
+        if self.overwrite and self.expected_output_sha256 is None:
+            raise ValueError(
+                "expected_output_sha256 is required when overwriting PDF output"
+            )
+        if not self.overwrite and self.expected_output_sha256 is not None:
+            raise ValueError("expected_output_sha256 requires overwrite=true")
+        return self
+
+
 SpreadsheetCellString = Annotated[str, Field(max_length=512)]
 SpreadsheetInteger = Annotated[
     StrictInt, Field(ge=-1_000_000_000_000_000, le=1_000_000_000_000_000)
