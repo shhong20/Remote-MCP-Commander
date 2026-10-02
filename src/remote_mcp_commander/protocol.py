@@ -955,6 +955,20 @@ class AuditQueryResult(BaseModel):
     scan_truncated: bool = False
 
 
+class RuntimeConfigResult(BaseModel):
+    mcp_version: str
+    agent_id: str
+    agent_version: str
+    protocol_version: int | None = None
+    operation_mode: Literal["hardened", "personal"]
+    capabilities: list[str] = Field(default_factory=list)
+    allowed_roots: list[str] = Field(default_factory=list)
+    generic_available: list[str] = Field(default_factory=list)
+    generic_unavailable: list[str] = Field(default_factory=list)
+    pty_available: list[str] = Field(default_factory=list)
+    pty_unavailable: list[str] = Field(default_factory=list)
+
+
 class AuditVerificationResult(BaseModel):
     valid: bool
     checked_records: int = 0

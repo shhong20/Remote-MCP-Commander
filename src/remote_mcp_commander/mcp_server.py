@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import secrets
 from urllib.parse import urlparse
 
@@ -9,11 +10,13 @@ from mcp.server.auth.settings import AuthSettings
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import AnyHttpUrl
 
+from remote_mcp_commander import __version__
 from remote_mcp_commander.config import Settings, get_settings
 from remote_mcp_commander.gateway.client import GatewayClient
 from remote_mcp_commander.oauth import OAuthTokenVerifier
 from remote_mcp_commander.protocol import (
     AgentInfo,
+    AuditQueryResult,
     CommandDiscoveryResult,
     CommandResult,
     CommandSessionDiscardResult,
@@ -52,6 +55,7 @@ from remote_mcp_commander.protocol import (
     PtySessionOutput,
     PtySessionResizeResult,
     PtySessionSnapshot,
+    RuntimeConfigResult,
     RuntimeSessionFilter,
     RuntimeSessionKind,
     ServiceAction,
@@ -119,6 +123,40 @@ def build_mcp(settings: Settings) -> MCPServer:
     async def device_info(agent_id: str) -> AgentInfo:
         """Return metadata for one connected device."""
         return await GatewayClient(settings).device_info(agent_id)
+
+    @server.tool()
+    async def get_runtime_config(agent_id: str) -> RuntimeConfigResult:
+        """Return sanitized runtime capabilities, roots, and command availability."""
+        client = GatewayClient(settings)
+        device, roots, commands = await asyncio.gather(
+            client.device_info(agent_id),
+            client.list_file_roots(agent_id),
+            client.list_commands(agent_id),
+        )
+        return RuntimeConfigResult(
+            mcp_version=__version__,
+            agent_id=device.agent_id,
+            agent_version=device.version,
+            protocol_version=device.protocol_version,
+            operation_mode=commands.operation_mode,
+            capabilities=device.capabilities,
+            allowed_roots=roots.roots,
+            generic_available=commands.generic_available,
+            generic_unavailable=commands.generic_unavailable,
+            pty_available=commands.pty_available,
+            pty_unavailable=commands.pty_unavailable,
+        )
+
+    @server.tool()
+    async def get_recent_activity(
+        limit: int = 50,
+        event: str | None = None,
+        agent_id: str | None = None,
+    ) -> AuditQueryResult:
+        """Return bounded, redacted recent audit activity from the Gateway."""
+        return await GatewayClient(settings).list_audit_records(
+            limit=limit, event=event, agent_id=agent_id
+        )
 
     @server.tool()
     async def ping_device(agent_id: str) -> PingResponse:

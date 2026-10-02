@@ -8,6 +8,7 @@ from remote_mcp_commander.config import Settings
 from remote_mcp_commander.protocol import (
     AgentInfo,
     AgentList,
+    AuditQueryResult,
     CommandDiscoveryResult,
     CommandResult,
     CommandSessionDiscardResult,
@@ -80,6 +81,7 @@ class GatewayClient:
         path: str,
         *,
         json_body: dict[str, Any] | None = None,
+        params: dict[str, Any] | None = None,
         timeout_s: float | None = None,
     ) -> Any:
         headers = {"Authorization": f"Bearer {self.settings.control_token}"}
@@ -89,7 +91,7 @@ class GatewayClient:
             timeout=timeout_s or self.settings.mcp_gateway_timeout_s,
             transport=self.transport,
         ) as client:
-            response = await client.request(method, path, json=json_body)
+            response = await client.request(method, path, json=json_body, params=params)
 
         if response.is_error:
             try:
@@ -103,6 +105,21 @@ class GatewayClient:
     async def list_devices(self) -> AgentList:
         payload = await self._request("GET", "/api/v1/agents")
         return AgentList.model_validate(payload)
+
+    async def list_audit_records(
+        self,
+        *,
+        limit: int = 50,
+        event: str | None = None,
+        agent_id: str | None = None,
+    ) -> AuditQueryResult:
+        params: dict[str, Any] = {"limit": limit}
+        if event is not None:
+            params["event"] = event
+        if agent_id is not None:
+            params["agent_id"] = agent_id
+        payload = await self._request("GET", "/api/v1/audit", params=params)
+        return AuditQueryResult.model_validate(payload)
 
     async def device_info(self, agent_id: str) -> AgentInfo:
         payload = await self._request("GET", f"/api/v1/agents/{agent_id}")
