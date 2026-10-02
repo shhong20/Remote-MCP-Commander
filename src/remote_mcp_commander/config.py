@@ -64,6 +64,10 @@ class Settings(BaseSettings):
     pty_input_max_bytes: int = Field(default=16_384, ge=1, le=65_536)
     allowed_roots_json: str = "[]"
     file_max_bytes: int = Field(default=1_048_576, ge=1, le=1_048_576)
+    transfer_max_bytes: int = Field(default=268_435_456, ge=1_048_576, le=1_073_741_824)
+    transfer_session_ttl_s: int = Field(default=900, ge=60, le=3600)
+    transfer_max_active: int = Field(default=4, ge=1, le=16)
+    transfer_request_timeout_s: float = Field(default=120.0, ge=15.0, le=600.0)
 
     gateway_http: str = "http://127.0.0.1:8765"
     mcp_transport: Literal["stdio", "streamable-http"] = "stdio"

@@ -87,6 +87,12 @@ from remote_mcp_commander.protocol import (
     DocumentPreviewBody,
     DocumentPreviewRequest,
     DocumentPreviewResult,
+    DownloadChunkBody,
+    DownloadChunkRequest,
+    DownloadChunkResult,
+    DownloadStartBody,
+    DownloadStartRequest,
+    DownloadStartResult,
     EnrollmentClaimBody,
     EnrollmentClaimResult,
     EnrollmentCreateBody,
@@ -197,12 +203,24 @@ from remote_mcp_commander.protocol import (
     SessionSignalResult,
     SystemHealthRequest,
     SystemHealthResult,
+    TransferCloseRequest,
+    TransferCloseResult,
+    TransferStatusRequest,
+    TransferStatusResult,
     TreeInspectBody,
     TreeInspectRequest,
     TreeInspectResult,
     TreeMutationBody,
     TreeMutationRequest,
     TreeMutationResult,
+    UploadChunkBody,
+    UploadChunkRequest,
+    UploadChunkResult,
+    UploadFinishRequest,
+    UploadFinishResult,
+    UploadStartBody,
+    UploadStartRequest,
+    UploadStartResult,
 )
 
 AgentReply = (
@@ -212,6 +230,13 @@ AgentReply = (
     | FileReadResult
     | BinaryReadResult
     | BinaryWriteResult
+    | UploadStartResult
+    | UploadChunkResult
+    | UploadFinishResult
+    | DownloadStartResult
+    | DownloadChunkResult
+    | TransferStatusResult
+    | TransferCloseResult
     | DocumentPreviewResult
     | ImagePreviewResult
     | FileLineReadResult
@@ -1932,6 +1957,307 @@ async def write_binary_file(
 
 
 @app.post(
+    "/api/v1/agents/{agent_id}/files/transfers/upload",
+    dependencies=[Depends(require_control_token)],
+)
+async def start_upload_transfer(
+    agent_id: str, body: UploadStartBody, settings: SettingsDep
+) -> UploadStartResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "file.transfer_upload")
+    session_id = uuid.uuid4().hex
+    request_id = uuid.uuid4().hex
+    audit_required(
+        "file_upload_started_requested",
+        agent_id=agent_id,
+        session_id=session_id,
+        path=body.path,
+        size=body.size,
+        overwrite=body.overwrite,
+    )
+    future = pending_request(connection, request_id)
+    try:
+        request = UploadStartRequest(
+            request_id=request_id, session_id=session_id, **body.model_dump()
+        )
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(
+            future, timeout=settings.transfer_request_timeout_s
+        )
+        if not isinstance(reply, UploadStartResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "file_upload_started",
+            agent_id=agent_id,
+            session_id=session_id,
+            path=body.path,
+            size=reply.size,
+            rejected=reply.rejected,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent upload start timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/files/transfers/{session_id}/upload-chunk",
+    dependencies=[Depends(require_control_token)],
+)
+async def upload_transfer_chunk(
+    agent_id: str,
+    session_id: str,
+    body: UploadChunkBody,
+    settings: SettingsDep,
+) -> UploadChunkResult:
+    validate_command_session_id(session_id)
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "file.transfer_upload")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = UploadChunkRequest(
+            request_id=request_id, session_id=session_id, **body.model_dump()
+        )
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(
+            future, timeout=settings.transfer_request_timeout_s
+        )
+        if not isinstance(reply, UploadChunkResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "file_upload_chunk",
+            agent_id=agent_id,
+            session_id=session_id,
+            offset=body.offset,
+            bytes_accepted=reply.bytes_accepted,
+            received=reply.received,
+            rejected=reply.rejected,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent upload chunk timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/files/transfers/{session_id}/finish-upload",
+    dependencies=[Depends(require_control_token)],
+)
+async def finish_upload_transfer(
+    agent_id: str, session_id: str, settings: SettingsDep
+) -> UploadFinishResult:
+    validate_command_session_id(session_id)
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "file.transfer_upload")
+    audit_required(
+        "file_upload_finish_requested",
+        agent_id=agent_id,
+        session_id=session_id,
+    )
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = UploadFinishRequest(request_id=request_id, session_id=session_id)
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(
+            future, timeout=settings.transfer_request_timeout_s
+        )
+        if not isinstance(reply, UploadFinishResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "file_upload_finished",
+            agent_id=agent_id,
+            session_id=session_id,
+            path=reply.path,
+            size=reply.size,
+            committed=reply.committed,
+            rejected=reply.rejected,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent upload finish timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/files/transfers/download",
+    dependencies=[Depends(require_control_token)],
+)
+async def start_download_transfer(
+    agent_id: str, body: DownloadStartBody, settings: SettingsDep
+) -> DownloadStartResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "file.transfer_download")
+    session_id = uuid.uuid4().hex
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = DownloadStartRequest(
+            request_id=request_id, session_id=session_id, **body.model_dump()
+        )
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(
+            future, timeout=settings.transfer_request_timeout_s
+        )
+        if not isinstance(reply, DownloadStartResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "file_download_started",
+            agent_id=agent_id,
+            session_id=session_id,
+            path=body.path,
+            size=reply.size,
+            rejected=reply.rejected,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent download start timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/files/transfers/{session_id}/download-chunk",
+    dependencies=[Depends(require_control_token)],
+)
+async def download_transfer_chunk(
+    agent_id: str,
+    session_id: str,
+    body: DownloadChunkBody,
+    settings: SettingsDep,
+) -> DownloadChunkResult:
+    validate_command_session_id(session_id)
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "file.transfer_download")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = DownloadChunkRequest(
+            request_id=request_id, session_id=session_id, **body.model_dump()
+        )
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(
+            future, timeout=settings.transfer_request_timeout_s
+        )
+        if not isinstance(reply, DownloadChunkResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "file_download_chunk",
+            agent_id=agent_id,
+            session_id=session_id,
+            offset=reply.offset,
+            next_offset=reply.next_offset,
+            size=reply.size,
+            rejected=reply.rejected,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent download chunk timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.get(
+    "/api/v1/agents/{agent_id}/files/transfers/{session_id}",
+    dependencies=[Depends(require_control_token)],
+)
+async def transfer_status(
+    agent_id: str, session_id: str, settings: SettingsDep
+) -> TransferStatusResult:
+    validate_command_session_id(session_id)
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    if not {"file.transfer_upload", "file.transfer_download"}.intersection(
+        connection.capabilities
+    ):
+        raise HTTPException(status_code=409, detail="agent does not advertise file transfer")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = TransferStatusRequest(request_id=request_id, session_id=session_id)
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(
+            future, timeout=settings.transfer_request_timeout_s
+        )
+        if not isinstance(reply, TransferStatusResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent transfer status timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/files/transfers/{session_id}/close",
+    dependencies=[Depends(require_control_token)],
+)
+async def close_transfer(
+    agent_id: str, session_id: str, settings: SettingsDep
+) -> TransferCloseResult:
+    validate_command_session_id(session_id)
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    if not {"file.transfer_upload", "file.transfer_download"}.intersection(
+        connection.capabilities
+    ):
+        raise HTTPException(status_code=409, detail="agent does not advertise file transfer")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = TransferCloseRequest(request_id=request_id, session_id=session_id)
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(
+            future, timeout=settings.transfer_request_timeout_s
+        )
+        if not isinstance(reply, TransferCloseResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "file_transfer_closed",
+            agent_id=agent_id,
+            session_id=session_id,
+            kind=reply.kind,
+            closed=reply.closed,
+            rejected=reply.rejected,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent transfer close timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
     "/api/v1/agents/{agent_id}/files/read-lines",
     dependencies=[Depends(require_control_token)],
 )
@@ -2972,6 +3298,20 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
                 reply = BinaryReadResult.model_validate(payload)
             elif message_type == "binary_write_result":
                 reply = BinaryWriteResult.model_validate(payload)
+            elif message_type == "upload_start_result":
+                reply = UploadStartResult.model_validate(payload)
+            elif message_type == "upload_chunk_result":
+                reply = UploadChunkResult.model_validate(payload)
+            elif message_type == "upload_finish_result":
+                reply = UploadFinishResult.model_validate(payload)
+            elif message_type == "download_start_result":
+                reply = DownloadStartResult.model_validate(payload)
+            elif message_type == "download_chunk_result":
+                reply = DownloadChunkResult.model_validate(payload)
+            elif message_type == "transfer_status_result":
+                reply = TransferStatusResult.model_validate(payload)
+            elif message_type == "transfer_close_result":
+                reply = TransferCloseResult.model_validate(payload)
             elif message_type == "document_preview_result":
                 reply = DocumentPreviewResult.model_validate(payload)
             elif message_type == "image_preview_result":

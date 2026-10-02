@@ -1235,3 +1235,145 @@ async def test_binary_write_client_sends_hash_guarded_payload() -> None:
     assert b'"data_base64":"AQID"' in seen[0].content
     assert b'"overwrite":true' in seen[0].content
     assert ("a" * 64).encode() in seen[0].content
+
+
+@pytest.mark.asyncio
+async def test_file_transfer_upload_client_routes_and_payloads() -> None:
+    seen: list[httpx.Request] = []
+    session_id = "a" * 32
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        if request.url.path.endswith("/files/transfers/upload"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "start",
+                    "session_id": session_id,
+                    "path": "/home/ubuntu/large.bin",
+                    "size": 1_500_000,
+                    "received": 0,
+                    "sha256": "b" * 64,
+                    "chunk_size": 262144,
+                },
+            )
+        if request.url.path.endswith("/upload-chunk"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "chunk",
+                    "session_id": session_id,
+                    "offset": 0,
+                    "bytes_accepted": 3,
+                    "received": 3,
+                    "complete": False,
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "finish",
+                "session_id": session_id,
+                "path": "/home/ubuntu/large.bin",
+                "size": 1_500_000,
+                "sha256": "b" * 64,
+                "committed": True,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    started = await client.start_upload_transfer(
+        "server-01",
+        "/home/ubuntu/large.bin",
+        1_500_000,
+        "b" * 64,
+        overwrite=True,
+        expected_sha256="a" * 64,
+    )
+    chunk = await client.upload_transfer_chunk("server-01", session_id, 0, "AQID")
+    finished = await client.finish_upload_transfer("server-01", session_id)
+
+    assert started.session_id == session_id
+    assert chunk.bytes_accepted == 3
+    assert finished.committed is True
+    assert seen[0].url.path.endswith("/files/transfers/upload")
+    assert b'"size":1500000' in seen[0].content
+    assert b'"expected_sha256"' in seen[0].content
+    assert seen[1].url.path.endswith(f"/{session_id}/upload-chunk")
+    assert b'"data_base64":"AQID"' in seen[1].content
+    assert seen[2].url.path.endswith(f"/{session_id}/finish-upload")
+
+
+@pytest.mark.asyncio
+async def test_file_transfer_download_status_and_close_client_routes() -> None:
+    seen: list[httpx.Request] = []
+    session_id = "c" * 32
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        path = request.url.path
+        if path.endswith("/files/transfers/download"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "start",
+                    "session_id": session_id,
+                    "path": "/home/ubuntu/large.bin",
+                    "size": 2_000_000,
+                    "sha256": "d" * 64,
+                    "chunk_size": 262144,
+                },
+            )
+        if path.endswith("/download-chunk"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "chunk",
+                    "session_id": session_id,
+                    "data_base64": "AQID",
+                    "size": 2_000_000,
+                    "offset": 10,
+                    "next_offset": 13,
+                    "eof": False,
+                    "sha256": "d" * 64,
+                },
+            )
+        if request.method == "GET":
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "status",
+                    "session_id": session_id,
+                    "kind": "download",
+                    "path": "/home/ubuntu/large.bin",
+                    "size": 2_000_000,
+                    "transferred": 13,
+                    "sha256": "d" * 64,
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "close",
+                "session_id": session_id,
+                "kind": "download",
+                "closed": True,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    started = await client.start_download_transfer("server-01", "/home/ubuntu/large.bin")
+    chunk = await client.download_transfer_chunk(
+        "server-01", session_id, offset=10, max_bytes=100
+    )
+    status = await client.transfer_status("server-01", session_id)
+    closed = await client.close_transfer("server-01", session_id)
+
+    assert started.size == 2_000_000
+    assert chunk.next_offset == 13
+    assert status.transferred == 13
+    assert closed.closed is True
+    assert seen[1].url.path.endswith(f"/{session_id}/download-chunk")
+    assert b'"offset":10' in seen[1].content
+    assert seen[2].method == "GET"
+    assert seen[3].url.path.endswith(f"/{session_id}/close")

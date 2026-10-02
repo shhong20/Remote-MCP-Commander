@@ -254,6 +254,178 @@ class BinaryWriteBody(BaseModel):
     )
 
 
+TransferKind = Literal["upload", "download"]
+
+
+class UploadStartRequest(BaseModel):
+    type: Literal["upload_start_request"] = "upload_start_request"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    path: str = Field(min_length=1, max_length=4096)
+    size: int = Field(ge=0, le=1_073_741_824)
+    sha256: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    overwrite: bool = False
+    expected_sha256: str | None = Field(
+        default=None, min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$"
+    )
+
+
+class UploadStartResult(BaseModel):
+    type: Literal["upload_start_result"] = "upload_start_result"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    path: str = ""
+    size: int = Field(default=0, ge=0, le=1_073_741_824)
+    received: int = Field(default=0, ge=0, le=1_073_741_824)
+    sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    chunk_size: int = Field(default=262_144, ge=1, le=262_144)
+    expires_at: datetime | None = None
+    rejected: bool = False
+    error: str | None = None
+
+
+class UploadChunkRequest(BaseModel):
+    type: Literal["upload_chunk_request"] = "upload_chunk_request"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    offset: int = Field(ge=0, le=1_073_741_824)
+    data_base64: str = Field(max_length=349_528)
+
+
+class UploadChunkResult(BaseModel):
+    type: Literal["upload_chunk_result"] = "upload_chunk_result"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    offset: int = Field(default=0, ge=0, le=1_073_741_824)
+    bytes_accepted: int = Field(default=0, ge=0, le=262_144)
+    received: int = Field(default=0, ge=0, le=1_073_741_824)
+    complete: bool = False
+    expires_at: datetime | None = None
+    rejected: bool = False
+    error: str | None = None
+
+
+class UploadFinishRequest(BaseModel):
+    type: Literal["upload_finish_request"] = "upload_finish_request"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+
+
+class UploadFinishResult(BaseModel):
+    type: Literal["upload_finish_result"] = "upload_finish_result"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    path: str = ""
+    size: int = Field(default=0, ge=0, le=1_073_741_824)
+    sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    committed: bool = False
+    rejected: bool = False
+    error: str | None = None
+
+
+class DownloadStartRequest(BaseModel):
+    type: Literal["download_start_request"] = "download_start_request"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    path: str = Field(min_length=1, max_length=4096)
+
+
+class DownloadStartResult(BaseModel):
+    type: Literal["download_start_result"] = "download_start_result"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    path: str = ""
+    size: int = Field(default=0, ge=0, le=1_073_741_824)
+    sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    chunk_size: int = Field(default=262_144, ge=1, le=262_144)
+    expires_at: datetime | None = None
+    rejected: bool = False
+    error: str | None = None
+
+
+class DownloadChunkRequest(BaseModel):
+    type: Literal["download_chunk_request"] = "download_chunk_request"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    offset: int = Field(default=0, ge=0, le=1_073_741_824)
+    max_bytes: int = Field(default=262_144, ge=1, le=262_144)
+
+
+class DownloadChunkResult(BaseModel):
+    type: Literal["download_chunk_result"] = "download_chunk_result"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    data_base64: str = Field(default="", max_length=349_528)
+    size: int = Field(default=0, ge=0, le=1_073_741_824)
+    offset: int = Field(default=0, ge=0, le=1_073_741_824)
+    next_offset: int = Field(default=0, ge=0, le=1_073_741_824)
+    eof: bool = True
+    sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    expires_at: datetime | None = None
+    rejected: bool = False
+    error: str | None = None
+
+
+class TransferStatusRequest(BaseModel):
+    type: Literal["transfer_status_request"] = "transfer_status_request"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+
+
+class TransferStatusResult(BaseModel):
+    type: Literal["transfer_status_result"] = "transfer_status_result"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    kind: TransferKind | None = None
+    path: str = ""
+    size: int = Field(default=0, ge=0, le=1_073_741_824)
+    transferred: int = Field(default=0, ge=0, le=1_073_741_824)
+    sha256: str | None = Field(default=None, pattern=r"^[0-9a-f]{64}$")
+    expires_at: datetime | None = None
+    rejected: bool = False
+    error: str | None = None
+
+
+class TransferCloseRequest(BaseModel):
+    type: Literal["transfer_close_request"] = "transfer_close_request"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+
+
+class TransferCloseResult(BaseModel):
+    type: Literal["transfer_close_result"] = "transfer_close_result"
+    request_id: str
+    session_id: str = Field(pattern=SESSION_ID_PATTERN)
+    kind: TransferKind | None = None
+    closed: bool = False
+    rejected: bool = False
+    error: str | None = None
+
+
+class UploadStartBody(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+    size: int = Field(ge=0, le=1_073_741_824)
+    sha256: str = Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$")
+    overwrite: bool = False
+    expected_sha256: str | None = Field(
+        default=None, min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$"
+    )
+
+
+class UploadChunkBody(BaseModel):
+    offset: int = Field(ge=0, le=1_073_741_824)
+    data_base64: str = Field(max_length=349_528)
+
+
+class DownloadStartBody(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+
+
+class DownloadChunkBody(BaseModel):
+    offset: int = Field(default=0, ge=0, le=1_073_741_824)
+    max_bytes: int = Field(default=262_144, ge=1, le=262_144)
+
+
 DocumentKind = Literal["pdf", "docx", "xlsx"]
 
 
