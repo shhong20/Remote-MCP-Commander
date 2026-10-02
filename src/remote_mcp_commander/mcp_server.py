@@ -2,21 +2,25 @@ from __future__ import annotations
 
 import asyncio
 import secrets
+from typing import Annotated
 from urllib.parse import urlparse
 
 from mcp.server import MCPServer
 from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.auth.settings import AuthSettings
 from mcp.server.transport_security import TransportSecuritySettings
-from pydantic import AnyHttpUrl
+from pydantic import AnyHttpUrl, Field
 
 from remote_mcp_commander import __version__
 from remote_mcp_commander.config import Settings, get_settings
-from remote_mcp_commander.gateway.client import GatewayClient
+from remote_mcp_commander.gateway.client import GatewayAPIError, GatewayClient
 from remote_mcp_commander.oauth import OAuthTokenVerifier
 from remote_mcp_commander.protocol import (
     AgentInfo,
     AuditQueryResult,
+    BatchCommandItemResult,
+    BatchCommandResult,
+    BatchCommandSpec,
     CommandDiscoveryResult,
     CommandResult,
     CommandSessionDiscardResult,
@@ -68,6 +72,35 @@ from remote_mcp_commander.protocol import (
     TreeInspectResult,
     TreeMutationResult,
 )
+
+
+async def execute_many_commands(
+    settings: Settings,
+    agent_id: str,
+    commands: list[BatchCommandSpec],
+    *,
+    max_concurrency: int,
+) -> BatchCommandResult:
+    semaphore = asyncio.Semaphore(max_concurrency)
+    client = GatewayClient(settings)
+
+    async def run_one(index: int, command: BatchCommandSpec) -> BatchCommandItemResult:
+        async with semaphore:
+            try:
+                result = await client.execute(
+                    agent_id, command.argv, cwd=command.cwd, env=command.env,
+                    timeout_s=command.timeout_s,
+                )
+                return BatchCommandItemResult(index=index, result=result)
+            except GatewayAPIError as exc:
+                return BatchCommandItemResult(
+                    index=index, status_code=exc.status_code, error=exc.detail
+                )
+
+    results = await asyncio.gather(
+        *(run_one(index, command) for index, command in enumerate(commands))
+    )
+    return BatchCommandResult(results=list(results))
 
 
 class StaticTokenVerifier(TokenVerifier):
@@ -199,6 +232,17 @@ def build_mcp(settings: Settings) -> MCPServer:
         """Execute argv with optional cwd/env and a bounded one-shot timeout override."""
         return await GatewayClient(settings).execute(
             agent_id, argv, cwd=cwd, env=env, timeout_s=timeout_s
+        )
+
+    @server.tool()
+    async def execute_many(
+        agent_id: str,
+        commands: Annotated[list[BatchCommandSpec], Field(min_length=1, max_length=16)],
+        max_concurrency: Annotated[int, Field(ge=1, le=4)] = 4,
+    ) -> BatchCommandResult:
+        """Execute up to 16 independent commands with bounded concurrency."""
+        return await execute_many_commands(
+            settings, agent_id, commands, max_concurrency=max_concurrency
         )
 
     @server.tool()

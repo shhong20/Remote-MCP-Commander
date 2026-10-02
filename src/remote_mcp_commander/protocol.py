@@ -57,6 +57,24 @@ class CommandResult(BaseModel):
     error: str | None = None
 
 
+class BatchCommandSpec(BaseModel):
+    argv: list[CommandArg] = Field(min_length=1, max_length=64)
+    cwd: str | None = Field(default=None, min_length=1, max_length=4096)
+    env: CommandEnv = Field(default_factory=dict, max_length=32)
+    timeout_s: float | None = Field(default=None, ge=0.1, le=60.0)
+
+
+class BatchCommandItemResult(BaseModel):
+    index: int = Field(ge=0)
+    result: CommandResult | None = None
+    status_code: int | None = None
+    error: str | None = None
+
+
+class BatchCommandResult(BaseModel):
+    results: list[BatchCommandItemResult] = Field(default_factory=list)
+
+
 class PingRequest(BaseModel):
     type: Literal["ping_request"] = "ping_request"
     request_id: str
