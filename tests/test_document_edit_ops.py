@@ -332,3 +332,34 @@ async def test_docx_edit_detects_concurrent_change_before_publish(
     assert "changed during edit" in (result.error or "")
     assert path.read_bytes() == b"external-change"
     assert not list(tmp_path.glob(".remote-mcp-docx-*"))
+
+
+@pytest.mark.asyncio
+async def test_xlsx_rejects_dtd_before_openpyxl_parse(tmp_path: Path) -> None:
+    path = tmp_path / "dtd.xlsx"
+    _make_xlsx(path)
+    rewritten = tmp_path / "rewritten.xlsx"
+    with zipfile.ZipFile(path, "r") as source, zipfile.ZipFile(
+        rewritten, "w", compression=zipfile.ZIP_DEFLATED
+    ) as target:
+        for info in source.infolist():
+            raw = source.read(info)
+            if info.filename == "xl/workbook.xml":
+                raw = b'<!DOCTYPE workbook [<!ENTITY injected "boom">]>' + raw
+            target.writestr(info, raw)
+    rewritten.replace(path)
+    original_hash = _sha256(path)
+
+    result = await edit_xlsx_range(
+        "req",
+        str(path),
+        "Data",
+        "A1:A1",
+        [[1]],
+        roots=[tmp_path],
+        expected_sha256=original_hash,
+    )
+
+    assert result.rejected is True
+    assert "DTD/entity" in (result.error or "")
+    assert _sha256(path) == original_hash

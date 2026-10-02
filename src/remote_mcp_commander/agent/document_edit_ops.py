@@ -17,6 +17,7 @@ from openpyxl.utils.exceptions import InvalidFileException
 
 from remote_mcp_commander.agent.document_ops import (
     DOCUMENT_MAX_INPUT_BYTES,
+    DOCUMENT_MAX_XML_BYTES,
     _parse_cell_range,
     _parse_xml,
     _validate_zip,
@@ -131,6 +132,19 @@ def _reject_macro_content(zf: zipfile.ZipFile) -> None:
             raise ValueError("symlink Office archive entries are not supported for editing")
         if lower.endswith("vbaproject.bin") or "/activex/" in f"/{lower}":
             raise ValueError("active-content Office documents are not supported for editing")
+
+
+def _validate_xlsx_xml_safety(zf: zipfile.ZipFile) -> None:
+    for info in zf.infolist():
+        lower = info.filename.lower()
+        if not (lower.endswith(".xml") or lower.endswith(".rels")):
+            continue
+        if info.file_size > DOCUMENT_MAX_XML_BYTES:
+            raise ValueError(f"XLSX XML member exceeds size limit: {info.filename}")
+        raw = zf.read(info)
+        upper = raw.upper()
+        if b"<!DOCTYPE" in upper or b"<!ENTITY" in upper:
+            raise ValueError("XLSX XML DTD/entity declarations are not supported")
 
 
 def _word_prefix(raw: bytes) -> str:
@@ -383,6 +397,7 @@ def _edit_xlsx_range_sync(
         with zipfile.ZipFile(path, "r") as zf:
             _validate_zip(zf)
             _reject_macro_content(zf)
+            _validate_xlsx_xml_safety(zf)
         rows, columns = _validate_xlsx_values(values)
         start_col, start_row, end_col, end_row, normalized = _parse_cell_range(cell_range)
         if end_row - start_row + 1 != rows or end_col - start_col + 1 != columns:
