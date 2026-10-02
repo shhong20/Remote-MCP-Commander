@@ -5,8 +5,17 @@ from mcp import Client
 
 from remote_mcp_commander.config import Settings
 from remote_mcp_commander.gateway.client import GatewayAPIError, GatewayClient
-from remote_mcp_commander.mcp_server import build_mcp, execute_many_commands
-from remote_mcp_commander.protocol import BatchCommandSpec, CommandResult
+from remote_mcp_commander.mcp_server import (
+    build_mcp,
+    execute_many_commands,
+    preview_many_documents,
+)
+from remote_mcp_commander.protocol import (
+    BatchCommandSpec,
+    BatchDocumentPreviewSpec,
+    CommandResult,
+    DocumentPreviewResult,
+)
 
 
 def make_settings(**overrides: object) -> Settings:
@@ -44,6 +53,7 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "list_directory_tree",
         "file_info",
         "preview_document",
+        "preview_documents",
         "read_file",
         "read_file_lines",
         "tail_file",
@@ -112,6 +122,20 @@ async def test_execute_schema_requires_structured_argv() -> None:
     assert preview_schema["properties"]["cell_range"]["default"] is None
     assert "cell_range" not in preview_schema.get("required", [])
     assert preview_schema["properties"]["max_rows"]["default"] == 200
+
+    document_batch_schema = next(
+        tool for tool in result.tools if tool.name == "preview_documents"
+    ).input_schema
+    assert set(document_batch_schema["required"]) == {"agent_id", "documents"}
+    assert document_batch_schema["properties"]["documents"]["minItems"] == 1
+    assert document_batch_schema["properties"]["documents"]["maxItems"] == 8
+    assert document_batch_schema["properties"]["max_concurrency"]["default"] == 4
+    assert document_batch_schema["properties"]["max_concurrency"]["minimum"] == 1
+    assert document_batch_schema["properties"]["max_concurrency"]["maximum"] == 4
+    batch_spec = document_batch_schema["$defs"]["BatchDocumentPreviewSpec"]
+    assert batch_spec["required"] == ["path"]
+    assert batch_spec["properties"]["max_chars"]["default"] == 32_768
+    assert batch_spec["properties"]["max_chars"]["maximum"] == 65_536
 
     batch_schema = next(
         tool for tool in result.tools if tool.name == "execute_many"
@@ -431,3 +455,116 @@ async def test_execute_many_isolates_gateway_policy_failure(monkeypatch) -> None
     assert result.results[0].result is None
     assert result.results[1].result is not None
     assert result.results[1].result.stdout == "ok"
+
+
+@pytest.mark.asyncio
+async def test_preview_many_preserves_order_and_bounds_concurrency(monkeypatch) -> None:
+    active = 0
+    max_active = 0
+    seen: list[tuple[str, dict[str, object]]] = []
+
+    async def fake_preview(self, agent_id, path, **kwargs):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        seen.append((path, kwargs))
+        await asyncio.sleep(0.01)
+        active -= 1
+        return DocumentPreviewResult(
+            request_id=path,
+            path=path,
+            kind="docx",
+            content=path,
+        )
+
+    monkeypatch.setattr(GatewayClient, "preview_document", fake_preview)
+    documents = [
+        BatchDocumentPreviewSpec(path=f"/home/ubuntu/doc-{index}.docx")
+        for index in range(6)
+    ]
+    result = await preview_many_documents(
+        make_settings(),
+        "server-01",
+        documents,
+        max_concurrency=2,
+    )
+
+    assert [item.index for item in result.results] == list(range(6))
+    assert [item.path for item in result.results] == [item.path for item in documents]
+    assert [item.result.content for item in result.results if item.result] == [
+        item.path for item in documents
+    ]
+    assert max_active == 2
+    assert all(kwargs["max_chars"] == 32_768 for _, kwargs in seen)
+
+
+@pytest.mark.asyncio
+async def test_preview_many_forwards_navigation_fields(monkeypatch) -> None:
+    seen: list[dict[str, object]] = []
+
+    async def fake_preview(self, agent_id, path, **kwargs):
+        seen.append(kwargs)
+        return DocumentPreviewResult(
+            request_id="xlsx",
+            path=path,
+            kind="xlsx",
+            content="ok",
+        )
+
+    monkeypatch.setattr(GatewayClient, "preview_document", fake_preview)
+    result = await preview_many_documents(
+        make_settings(),
+        "server-01",
+        [
+            BatchDocumentPreviewSpec(
+                path="/home/ubuntu/report.xlsx",
+                sheet="Data",
+                cell_range="B2:F40",
+                max_rows=25,
+                max_chars=4096,
+            )
+        ],
+        max_concurrency=1,
+    )
+
+    assert result.results[0].result is not None
+    assert seen == [
+        {
+            "page": 1,
+            "max_pages": 5,
+            "sheet": "Data",
+            "cell_range": "B2:F40",
+            "max_rows": 25,
+            "max_chars": 4096,
+        }
+    ]
+
+
+@pytest.mark.asyncio
+async def test_preview_many_isolates_gateway_failure(monkeypatch) -> None:
+    async def fake_preview(self, agent_id, path, **kwargs):
+        if path.endswith("blocked.pdf"):
+            raise GatewayAPIError(403, "document denied")
+        return DocumentPreviewResult(
+            request_id="ok",
+            path=path,
+            kind="pdf",
+            content="ok",
+        )
+
+    monkeypatch.setattr(GatewayClient, "preview_document", fake_preview)
+    result = await preview_many_documents(
+        make_settings(),
+        "server-01",
+        [
+            BatchDocumentPreviewSpec(path="/home/ubuntu/blocked.pdf"),
+            BatchDocumentPreviewSpec(path="/home/ubuntu/ok.pdf"),
+        ],
+        max_concurrency=2,
+    )
+
+    assert result.results[0].status_code == 403
+    assert result.results[0].error == "document denied"
+    assert result.results[0].result is None
+    assert result.results[1].result is not None
+    assert result.results[1].result.content == "ok"
