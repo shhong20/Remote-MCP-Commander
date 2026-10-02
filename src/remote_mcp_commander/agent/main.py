@@ -8,6 +8,7 @@ import socket
 import websockets
 
 from remote_mcp_commander import __version__
+from remote_mcp_commander.agent.binary_ops import read_binary_file, write_binary_file
 from remote_mcp_commander.agent.capabilities import detect_capabilities, discover_commands
 from remote_mcp_commander.agent.diagnostics import lookup_port, service_logs, system_health
 from remote_mcp_commander.agent.document_ops import preview_document
@@ -53,6 +54,8 @@ from remote_mcp_commander.protocol import (
     PROTOCOL_MAX_SUPPORTED,
     PROTOCOL_MIN_SUPPORTED,
     AgentHello,
+    BinaryReadRequest,
+    BinaryWriteRequest,
     CommandDiscoveryRequest,
     CommandRequest,
     CommandSessionCancelRequest,
@@ -490,6 +493,33 @@ async def agent_loop() -> None:
                                 roots=roots,
                                 offset=request.offset,
                                 max_bytes=request.max_bytes,
+                                max_file_bytes=settings.file_max_bytes,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "binary_read_request":
+                            request = BinaryReadRequest.model_validate(payload)
+                            result = await read_binary_file(
+                                request.request_id,
+                                request.path,
+                                roots=roots,
+                                offset=request.offset,
+                                max_bytes=request.max_bytes,
+                                max_file_bytes=settings.file_max_bytes,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "binary_write_request":
+                            request = BinaryWriteRequest.model_validate(payload)
+                            result = await write_binary_file(
+                                request.request_id,
+                                request.path,
+                                request.data_base64,
+                                roots=roots,
+                                overwrite=request.overwrite,
+                                expected_sha256=request.expected_sha256,
                                 max_file_bytes=settings.file_max_bytes,
                             )
                             await websocket.send(result.model_dump_json())

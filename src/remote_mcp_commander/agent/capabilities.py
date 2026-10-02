@@ -49,6 +49,8 @@ def detect_capabilities(settings: Settings, roots: list[Path]) -> list[str]:
                 "file.read_lines",
                 "file.tail",
                 "file.read_many",
+                "file.binary_read",
+                "file.binary_write",
                 "document.preview",
                 "image.preview",
                 "file.write",

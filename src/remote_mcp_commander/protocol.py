@@ -192,6 +192,68 @@ class FileReadResult(BaseModel):
     error: str | None = None
 
 
+class BinaryReadRequest(BaseModel):
+    type: Literal["binary_read_request"] = "binary_read_request"
+    request_id: str
+    path: str = Field(min_length=1, max_length=4096)
+    offset: int = Field(default=0, ge=0, le=1_048_576)
+    max_bytes: int = Field(default=262_144, ge=1, le=262_144)
+
+
+class BinaryReadResult(BaseModel):
+    type: Literal["binary_read_result"] = "binary_read_result"
+    request_id: str
+    path: str = ""
+    data_base64: str = Field(default="", max_length=349_528)
+    size: int = Field(default=0, ge=0, le=1_048_576)
+    offset: int = Field(default=0, ge=0, le=1_048_576)
+    next_offset: int = Field(default=0, ge=0, le=1_048_576)
+    eof: bool = True
+    sha256: str | None = Field(
+        default=None, min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$"
+    )
+    rejected: bool = False
+    error: str | None = None
+
+
+class BinaryWriteRequest(BaseModel):
+    type: Literal["binary_write_request"] = "binary_write_request"
+    request_id: str
+    path: str = Field(min_length=1, max_length=4096)
+    data_base64: str = Field(max_length=1_398_104)
+    overwrite: bool = False
+    expected_sha256: str | None = Field(
+        default=None, min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$"
+    )
+
+
+class BinaryWriteResult(BaseModel):
+    type: Literal["binary_write_result"] = "binary_write_result"
+    request_id: str
+    path: str = ""
+    bytes_written: int = Field(default=0, ge=0, le=1_048_576)
+    sha256: str | None = Field(
+        default=None, min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$"
+    )
+    rejected: bool = False
+    error: str | None = None
+
+
+class BinaryReadBody(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+    offset: int = Field(default=0, ge=0, le=1_048_576)
+    max_bytes: int = Field(default=262_144, ge=1, le=262_144)
+
+
+class BinaryWriteBody(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+    data_base64: str = Field(max_length=1_398_104)
+    overwrite: bool = False
+    expected_sha256: str | None = Field(
+        default=None, min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$"
+    )
+
+
 DocumentKind = Literal["pdf", "docx", "xlsx"]
 
 

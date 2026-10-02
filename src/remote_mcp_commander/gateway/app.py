@@ -50,6 +50,12 @@ from remote_mcp_commander.protocol import (
     ApprovalTicket,
     AuditQueryResult,
     AuditVerificationResult,
+    BinaryReadBody,
+    BinaryReadRequest,
+    BinaryReadResult,
+    BinaryWriteBody,
+    BinaryWriteRequest,
+    BinaryWriteResult,
     CommandDiscoveryRequest,
     CommandDiscoveryResult,
     CommandRequest,
@@ -204,6 +210,8 @@ AgentReply = (
     | CommandDiscoveryResult
     | PingResult
     | FileReadResult
+    | BinaryReadResult
+    | BinaryWriteResult
     | DocumentPreviewResult
     | ImagePreviewResult
     | FileLineReadResult
@@ -1846,6 +1854,84 @@ async def preview_agent_image(
 
 
 @app.post(
+    "/api/v1/agents/{agent_id}/files/read-binary",
+    dependencies=[Depends(require_control_token)],
+)
+async def read_binary_file(
+    agent_id: str, body: BinaryReadBody, settings: SettingsDep
+) -> BinaryReadResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "file.binary_read")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = BinaryReadRequest(request_id=request_id, **body.model_dump())
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, BinaryReadResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "file_binary_read",
+            agent_id=agent_id,
+            path=body.path,
+            offset=reply.offset,
+            next_offset=reply.next_offset,
+            size=reply.size,
+            rejected=reply.rejected,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent binary file read timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/files/write-binary",
+    dependencies=[Depends(require_control_token)],
+)
+async def write_binary_file(
+    agent_id: str, body: BinaryWriteBody, settings: SettingsDep
+) -> BinaryWriteResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "file.binary_write")
+    audit_required(
+        "file_binary_write_requested",
+        agent_id=agent_id,
+        path=body.path,
+        overwrite=body.overwrite,
+    )
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = BinaryWriteRequest(request_id=request_id, **body.model_dump())
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, BinaryWriteResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "file_binary_write",
+            agent_id=agent_id,
+            path=body.path,
+            bytes_written=reply.bytes_written,
+            rejected=reply.rejected,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent binary file write timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
     "/api/v1/agents/{agent_id}/files/read-lines",
     dependencies=[Depends(require_control_token)],
 )
@@ -2882,6 +2968,10 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
                 reply = FileInfoResult.model_validate(payload)
             elif message_type == "file_read_result":
                 reply = FileReadResult.model_validate(payload)
+            elif message_type == "binary_read_result":
+                reply = BinaryReadResult.model_validate(payload)
+            elif message_type == "binary_write_result":
+                reply = BinaryWriteResult.model_validate(payload)
             elif message_type == "document_preview_result":
                 reply = DocumentPreviewResult.model_validate(payload)
             elif message_type == "image_preview_result":

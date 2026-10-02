@@ -1171,3 +1171,67 @@ async def test_preview_image_client_uses_bounded_image_route() -> None:
     assert seen[0].method == "POST"
     assert seen[0].url.path.endswith("/images/preview")
     assert seen[0].content == b'{"path":"/home/ubuntu/sample.png"}'
+
+
+@pytest.mark.asyncio
+async def test_binary_read_client_uses_bounded_route() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "binary-read",
+                "path": "/home/ubuntu/payload.bin",
+                "data_base64": "AQID",
+                "size": 6,
+                "offset": 1,
+                "next_offset": 4,
+                "eof": False,
+                "sha256": "a" * 64,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    result = await client.read_binary_file(
+        "server-01", "/home/ubuntu/payload.bin", offset=1, max_bytes=3
+    )
+
+    assert result.data_base64 == "AQID"
+    assert result.next_offset == 4
+    assert seen[0].url.path.endswith("/files/read-binary")
+    assert b'"offset":1' in seen[0].content
+    assert b'"max_bytes":3' in seen[0].content
+
+
+@pytest.mark.asyncio
+async def test_binary_write_client_sends_hash_guarded_payload() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "binary-write",
+                "path": "/home/ubuntu/payload.bin",
+                "bytes_written": 3,
+                "sha256": "b" * 64,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    result = await client.write_binary_file(
+        "server-01",
+        "/home/ubuntu/payload.bin",
+        "AQID",
+        overwrite=True,
+        expected_sha256="a" * 64,
+    )
+
+    assert result.bytes_written == 3
+    assert seen[0].url.path.endswith("/files/write-binary")
+    assert b'"data_base64":"AQID"' in seen[0].content
+    assert b'"overwrite":true' in seen[0].content
+    assert ("a" * 64).encode() in seen[0].content

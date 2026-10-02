@@ -30,6 +30,8 @@ from remote_mcp_commander.protocol import (
     BatchDocumentPreviewItemResult,
     BatchDocumentPreviewResult,
     BatchDocumentPreviewSpec,
+    BinaryReadResult,
+    BinaryWriteResult,
     CommandDiscoveryResult,
     CommandResult,
     CommandSessionDiscardResult,
@@ -719,6 +721,18 @@ def build_mcp(settings: Settings) -> MCPServer:
         )
 
     @server.tool()
+    async def read_binary(
+        agent_id: str,
+        path: str,
+        offset: Annotated[int, Field(ge=0, le=1_048_576)] = 0,
+        max_bytes: Annotated[int, Field(ge=1, le=262_144)] = 262_144,
+    ) -> BinaryReadResult:
+        """Read a bounded binary chunk as base64 with whole-file SHA-256 metadata."""
+        return await GatewayClient(settings).read_binary_file(
+            agent_id, path, offset=offset, max_bytes=max_bytes
+        )
+
+    @server.tool()
     async def read_file_lines(
         agent_id: str, path: str, offset: int = 0, max_lines: int = 200
     ) -> FileLineReadResult:
@@ -764,6 +778,26 @@ def build_mcp(settings: Settings) -> MCPServer:
             agent_id,
             path,
             content,
+            overwrite=overwrite,
+            expected_sha256=expected_sha256,
+        )
+
+    @server.tool()
+    async def write_binary(
+        agent_id: str,
+        path: str,
+        data_base64: Annotated[str, Field(max_length=1_398_104)],
+        overwrite: bool = False,
+        expected_sha256: Annotated[
+            str | None,
+            Field(min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$"),
+        ] = None,
+    ) -> BinaryWriteResult:
+        """Atomically write a bounded base64 binary payload inside Agent allowed roots."""
+        return await GatewayClient(settings).write_binary_file(
+            agent_id,
+            path,
+            data_base64,
             overwrite=overwrite,
             expected_sha256=expected_sha256,
         )
