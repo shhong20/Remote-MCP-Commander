@@ -158,6 +158,9 @@ from remote_mcp_commander.protocol import (
     PathMutationBody,
     PathMutationRequest,
     PathMutationResult,
+    PdfComposeBody,
+    PdfComposeRequest,
+    PdfComposeResult,
     PingRequest,
     PingResponse,
     PingResult,
@@ -253,6 +256,7 @@ AgentReply = (
     | TransferCloseResult
     | DocumentPreviewResult
     | DocumentEditResult
+    | PdfComposeResult
     | ImagePreviewResult
     | FileLineReadResult
     | FileTailResult
@@ -2030,6 +2034,50 @@ async def edit_agent_xlsx_range(
 
 
 @app.post(
+    "/api/v1/agents/{agent_id}/pdf/compose",
+    dependencies=[Depends(require_control_token)],
+)
+async def compose_agent_pdf(
+    agent_id: str, body: PdfComposeBody, settings: SettingsDep
+) -> PdfComposeResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "pdf.compose")
+    audit_required(
+        "pdf_compose_requested",
+        agent_id=agent_id,
+        output_path=body.output_path,
+        source_count=len(body.sources),
+        overwrite=body.overwrite,
+    )
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = PdfComposeRequest(request_id=request_id, **body.model_dump())
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=max(settings.request_timeout_s, 90.0))
+        if not isinstance(reply, PdfComposeResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "pdf_compose",
+            agent_id=agent_id,
+            output_path=body.output_path,
+            source_count=len(body.sources),
+            pages_written=reply.pages_written,
+            bytes_written=reply.bytes_written,
+            rejected=reply.rejected,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent PDF composition timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
     "/api/v1/agents/{agent_id}/images/preview",
     dependencies=[Depends(require_control_token)],
 )
@@ -3505,6 +3553,8 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
                 reply = DocumentPreviewResult.model_validate(payload)
             elif message_type == "document_edit_result":
                 reply = DocumentEditResult.model_validate(payload)
+            elif message_type == "pdf_compose_result":
+                reply = PdfComposeResult.model_validate(payload)
             elif message_type == "image_preview_result":
                 reply = ImagePreviewResult.model_validate(payload)
             elif message_type == "file_line_read_result":

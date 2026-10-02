@@ -66,6 +66,7 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "preview_document",
         "replace_docx_text",
         "edit_xlsx_range",
+        "compose_pdf_pages",
         "preview_documents",
         "preview_image",
         "read_multiple_files",
@@ -201,6 +202,19 @@ async def test_execute_schema_requires_structured_argv() -> None:
     assert row_schema["maxItems"] == 32
     assert row_schema["items"]["anyOf"][0]["maxLength"] == 512
     assert xlsx_edit_schema["properties"]["expected_sha256"]["pattern"] == "^[a-f0-9]{64}$"
+
+    pdf_compose_schema = next(
+        tool for tool in result.tools if tool.name == "compose_pdf_pages"
+    ).input_schema
+    assert set(pdf_compose_schema["required"]) == {"agent_id", "output_path", "sources"}
+    assert pdf_compose_schema["properties"]["sources"]["minItems"] == 1
+    assert pdf_compose_schema["properties"]["sources"]["maxItems"] == 16
+    assert pdf_compose_schema["properties"]["overwrite"]["default"] is False
+    assert pdf_compose_schema["properties"]["expected_sha256"]["default"] is None
+    pdf_source = pdf_compose_schema["$defs"]["PdfPageSource"]
+    assert pdf_source["properties"]["start_page"]["default"] == 1
+    assert pdf_source["properties"]["start_page"]["maximum"] == 100_000
+    assert pdf_source["properties"]["end_page"]["anyOf"][0]["maximum"] == 100_000
 
     binary_read_schema = next(
         tool for tool in result.tools if tool.name == "read_binary"

@@ -44,6 +44,9 @@ from remote_mcp_commander.protocol import (
     OperatorConfigSnapshot,
     OperatorConfigUpdateResult,
     PathMutationResult,
+    PdfComposeBody,
+    PdfComposeResult,
+    PdfPageSource,
     PingResponse,
     PortLookupResult,
     ProcessInfoResult,
@@ -586,6 +589,29 @@ class GatewayClient:
             timeout_s=max(self.settings.mcp_gateway_timeout_s, 35.0),
         )
         return DocumentEditResult.model_validate(payload)
+
+    async def compose_pdf_pages(
+        self,
+        agent_id: str,
+        output_path: str,
+        sources: list[PdfPageSource],
+        *,
+        overwrite: bool = False,
+        expected_sha256: str | None = None,
+    ) -> PdfComposeResult:
+        body = PdfComposeBody(
+            output_path=output_path,
+            sources=sources,
+            overwrite=overwrite,
+            expected_sha256=expected_sha256,
+        )
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/pdf/compose",
+            json_body=body.model_dump(),
+            timeout_s=max(self.settings.mcp_gateway_timeout_s, 95.0),
+        )
+        return PdfComposeResult.model_validate(payload)
 
     async def preview_image(self, agent_id: str, path: str) -> ImagePreviewResult:
         payload = await self._request(

@@ -427,6 +427,67 @@ class DownloadChunkBody(BaseModel):
 
 
 DocumentKind = Literal["pdf", "docx", "xlsx"]
+
+
+class PdfPageSource(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+    start_page: int = Field(default=1, ge=1, le=100_000)
+    end_page: int | None = Field(default=None, ge=1, le=100_000)
+
+    @model_validator(mode="after")
+    def validate_page_range(self) -> PdfPageSource:
+        if self.end_page is not None and self.start_page > self.end_page:
+            raise ValueError("PDF start_page must not exceed end_page")
+        return self
+
+
+class PdfComposeRequest(BaseModel):
+    type: Literal["pdf_compose_request"] = "pdf_compose_request"
+    request_id: str
+    output_path: str = Field(min_length=1, max_length=4096)
+    sources: list[PdfPageSource] = Field(min_length=1, max_length=16)
+    overwrite: bool = False
+    expected_sha256: str | None = Field(
+        default=None, min_length=64, max_length=64, pattern=r"^[a-f0-9]{64}$"
+    )
+
+    @model_validator(mode="after")
+    def validate_overwrite_guard(self) -> PdfComposeRequest:
+        if self.overwrite and self.expected_sha256 is None:
+            raise ValueError("expected_sha256 is required when overwriting PDF output")
+        if not self.overwrite and self.expected_sha256 is not None:
+            raise ValueError("expected_sha256 requires overwrite=true")
+        return self
+
+
+class PdfComposeResult(BaseModel):
+    type: Literal["pdf_compose_result"] = "pdf_compose_result"
+    request_id: str
+    output_path: str = ""
+    pages_written: int = 0
+    bytes_written: int = 0
+    sha256: str | None = None
+    rejected: bool = False
+    error: str | None = None
+
+
+class PdfComposeBody(BaseModel):
+    output_path: str = Field(min_length=1, max_length=4096)
+    sources: list[PdfPageSource] = Field(min_length=1, max_length=16)
+    overwrite: bool = False
+    expected_sha256: str | None = Field(
+        default=None, min_length=64, max_length=64, pattern=r"^[a-f0-9]{64}$"
+    )
+
+    @model_validator(mode="after")
+    def validate_overwrite_guard(self) -> PdfComposeBody:
+        if self.overwrite and self.expected_sha256 is None:
+            raise ValueError("expected_sha256 is required when overwriting PDF output")
+        if not self.overwrite and self.expected_sha256 is not None:
+            raise ValueError("expected_sha256 requires overwrite=true")
+        return self
+
+
 SpreadsheetCellString = Annotated[str, Field(max_length=512)]
 SpreadsheetInteger = Annotated[
     StrictInt, Field(ge=-1_000_000_000_000_000, le=1_000_000_000_000_000)
