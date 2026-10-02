@@ -11,6 +11,7 @@ from remote_mcp_commander import __version__
 from remote_mcp_commander.agent.binary_ops import read_binary_file, write_binary_file
 from remote_mcp_commander.agent.capabilities import detect_capabilities, discover_commands
 from remote_mcp_commander.agent.diagnostics import lookup_port, service_logs, system_health
+from remote_mcp_commander.agent.document_edit_ops import edit_xlsx_range, replace_docx_text
 from remote_mcp_commander.agent.document_ops import preview_document
 from remote_mcp_commander.agent.edit_ops import edit_text_file
 from remote_mcp_commander.agent.file_ops import (
@@ -70,6 +71,7 @@ from remote_mcp_commander.protocol import (
     DirectoryListRequest,
     DirectoryTreeRequest,
     DocumentPreviewRequest,
+    DocxTextReplaceRequest,
     DownloadChunkRequest,
     DownloadStartRequest,
     FileAppendRequest,
@@ -120,6 +122,7 @@ from remote_mcp_commander.protocol import (
     UploadChunkRequest,
     UploadFinishRequest,
     UploadStartRequest,
+    XlsxRangeEditRequest,
 )
 
 
@@ -620,6 +623,34 @@ async def agent_loop() -> None:
                                 cell_range=request.cell_range,
                                 max_rows=request.max_rows,
                                 max_chars=request.max_chars,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "docx_text_replace_request":
+                            request = DocxTextReplaceRequest.model_validate(payload)
+                            result = await replace_docx_text(
+                                request.request_id,
+                                request.path,
+                                request.old_text,
+                                request.new_text,
+                                roots=roots,
+                                expected_sha256=request.expected_sha256,
+                                expected_replacements=request.expected_replacements,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "xlsx_range_edit_request":
+                            request = XlsxRangeEditRequest.model_validate(payload)
+                            result = await edit_xlsx_range(
+                                request.request_id,
+                                request.path,
+                                request.sheet,
+                                request.cell_range,
+                                request.values,
+                                roots=roots,
+                                expected_sha256=request.expected_sha256,
                             )
                             await websocket.send(result.model_dump_json())
                             continue

@@ -64,6 +64,8 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "list_directory_tree",
         "file_info",
         "preview_document",
+        "replace_docx_text",
+        "edit_xlsx_range",
         "preview_documents",
         "preview_image",
         "read_multiple_files",
@@ -175,6 +177,30 @@ async def test_execute_schema_requires_structured_argv() -> None:
     assert multi_spec["properties"]["max_chars"]["maximum"] == 65_536
     assert multi_spec["properties"]["max_bytes"]["default"] == 32_768
     assert multi_spec["properties"]["max_bytes"]["maximum"] == 65_536
+
+    docx_edit_schema = next(
+        tool for tool in result.tools if tool.name == "replace_docx_text"
+    ).input_schema
+    assert set(docx_edit_schema["required"]) == {
+        "agent_id", "path", "old_text", "new_text", "expected_sha256"
+    }
+    assert docx_edit_schema["properties"]["path"]["maxLength"] == 4096
+    assert docx_edit_schema["properties"]["old_text"]["maxLength"] == 8192
+    assert docx_edit_schema["properties"]["new_text"]["maxLength"] == 8192
+    assert docx_edit_schema["properties"]["expected_sha256"]["pattern"] == "^[a-f0-9]{64}$"
+    assert docx_edit_schema["properties"]["expected_replacements"]["maximum"] == 100
+
+    xlsx_edit_schema = next(
+        tool for tool in result.tools if tool.name == "edit_xlsx_range"
+    ).input_schema
+    assert set(xlsx_edit_schema["required"]) == {
+        "agent_id", "path", "sheet", "cell_range", "values", "expected_sha256"
+    }
+    assert xlsx_edit_schema["properties"]["values"]["maxItems"] == 100
+    row_schema = xlsx_edit_schema["properties"]["values"]["items"]
+    assert row_schema["maxItems"] == 32
+    assert row_schema["items"]["anyOf"][0]["maxLength"] == 512
+    assert xlsx_edit_schema["properties"]["expected_sha256"]["pattern"] == "^[a-f0-9]{64}$"
 
     binary_read_schema = next(
         tool for tool in result.tools if tool.name == "read_binary"

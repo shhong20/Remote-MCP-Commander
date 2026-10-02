@@ -427,6 +427,81 @@ class DownloadChunkBody(BaseModel):
 
 
 DocumentKind = Literal["pdf", "docx", "xlsx"]
+SpreadsheetCellString = Annotated[str, Field(max_length=512)]
+SpreadsheetInteger = Annotated[
+    StrictInt, Field(ge=-1_000_000_000_000_000, le=1_000_000_000_000_000)
+]
+SpreadsheetNumber = Annotated[StrictFloat, Field(ge=-1e100, le=1e100, allow_inf_nan=False)]
+SpreadsheetCellValue = SpreadsheetCellString | bool | SpreadsheetInteger | SpreadsheetNumber | None
+SpreadsheetRow = Annotated[list[SpreadsheetCellValue], Field(min_length=1, max_length=32)]
+XLSX_EDIT_MAX_CELLS = 4096
+XLSX_EDIT_MAX_TEXT_BYTES = 524_288
+
+
+def _validate_xlsx_edit_values(values: list[SpreadsheetRow]) -> None:
+    widths = {len(row) for row in values}
+    if len(widths) != 1:
+        raise ValueError("XLSX values must be a rectangular 2D array")
+    if sum(len(row) for row in values) > XLSX_EDIT_MAX_CELLS:
+        raise ValueError(f"XLSX edit exceeds {XLSX_EDIT_MAX_CELLS} cell limit")
+    text_bytes = sum(
+        len(value.encode("utf-8"))
+        for row in values
+        for value in row
+        if isinstance(value, str)
+    )
+    if text_bytes > XLSX_EDIT_MAX_TEXT_BYTES:
+        raise ValueError("XLSX edit text payload exceeds UTF-8 byte limit")
+    if any(
+        isinstance(value, str) and value.startswith("=")
+        for row in values
+        for value in row
+    ):
+        raise ValueError("XLSX formula injection is not supported by this editor")
+
+
+class DocumentEditResult(BaseModel):
+    type: Literal["document_edit_result"] = "document_edit_result"
+    request_id: str
+    path: str = ""
+    kind: Literal["docx", "xlsx"] | None = None
+    replacements: int = 0
+    cells_updated: int = 0
+    bytes_written: int = 0
+    sha256: str | None = None
+    sheet: str | None = None
+    cell_range: str | None = None
+    rejected: bool = False
+    error: str | None = None
+
+
+class DocxTextReplaceRequest(BaseModel):
+    type: Literal["docx_text_replace_request"] = "docx_text_replace_request"
+    request_id: str
+    path: str = Field(min_length=1, max_length=4096)
+    old_text: str = Field(min_length=1, max_length=8192)
+    new_text: str = Field(max_length=8192)
+    expected_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    expected_replacements: int = Field(default=1, ge=1, le=100)
+
+
+class XlsxRangeEditRequest(BaseModel):
+    type: Literal["xlsx_range_edit_request"] = "xlsx_range_edit_request"
+    request_id: str
+    path: str = Field(min_length=1, max_length=4096)
+    sheet: str = Field(min_length=1, max_length=128)
+    cell_range: str = Field(
+        min_length=5,
+        max_length=32,
+        pattern=r"^[A-Za-z]{1,3}[1-9][0-9]{0,6}:[A-Za-z]{1,3}[1-9][0-9]{0,6}$",
+    )
+    values: list[SpreadsheetRow] = Field(min_length=1, max_length=100)
+    expected_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @model_validator(mode="after")
+    def validate_edit_values(self) -> XlsxRangeEditRequest:
+        _validate_xlsx_edit_values(self.values)
+        return self
 
 
 class DocumentHeading(BaseModel):
@@ -713,6 +788,31 @@ class FileReadBody(BaseModel):
 
 class ImagePreviewBody(BaseModel):
     path: str = Field(min_length=1, max_length=4096)
+
+
+class DocxTextReplaceBody(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+    old_text: str = Field(min_length=1, max_length=8192)
+    new_text: str = Field(max_length=8192)
+    expected_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+    expected_replacements: int = Field(default=1, ge=1, le=100)
+
+
+class XlsxRangeEditBody(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+    sheet: str = Field(min_length=1, max_length=128)
+    cell_range: str = Field(
+        min_length=5,
+        max_length=32,
+        pattern=r"^[A-Za-z]{1,3}[1-9][0-9]{0,6}:[A-Za-z]{1,3}[1-9][0-9]{0,6}$",
+    )
+    values: list[SpreadsheetRow] = Field(min_length=1, max_length=100)
+    expected_sha256: str = Field(pattern=r"^[a-f0-9]{64}$")
+
+    @model_validator(mode="after")
+    def validate_edit_values(self) -> XlsxRangeEditBody:
+        _validate_xlsx_edit_values(self.values)
+        return self
 
 
 class DocumentPreviewBody(BaseModel):

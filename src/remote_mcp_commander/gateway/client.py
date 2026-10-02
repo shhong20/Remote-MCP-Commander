@@ -21,7 +21,9 @@ from remote_mcp_commander.protocol import (
     CommandSessionStdinCloseResult,
     DirectoryListResult,
     DirectoryTreeResult,
+    DocumentEditResult,
     DocumentPreviewResult,
+    DocxTextReplaceBody,
     DownloadChunkResult,
     DownloadStartResult,
     FileAppendResult,
@@ -60,6 +62,7 @@ from remote_mcp_commander.protocol import (
     ServiceStatusResult,
     SessionListResult,
     SessionSignalResult,
+    SpreadsheetCellValue,
     SystemHealthResult,
     TransferCloseResult,
     TransferStatusResult,
@@ -68,6 +71,7 @@ from remote_mcp_commander.protocol import (
     UploadChunkResult,
     UploadFinishResult,
     UploadStartResult,
+    XlsxRangeEditBody,
 )
 
 
@@ -532,6 +536,56 @@ class GatewayClient:
             timeout_s=max(self.settings.mcp_gateway_timeout_s, 25.0),
         )
         return DocumentPreviewResult.model_validate(payload)
+
+    async def replace_docx_text(
+        self,
+        agent_id: str,
+        path: str,
+        old_text: str,
+        new_text: str,
+        *,
+        expected_sha256: str,
+        expected_replacements: int = 1,
+    ) -> DocumentEditResult:
+        body = DocxTextReplaceBody(
+            path=path,
+            old_text=old_text,
+            new_text=new_text,
+            expected_sha256=expected_sha256,
+            expected_replacements=expected_replacements,
+        )
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/documents/docx/replace-text",
+            json_body=body.model_dump(),
+            timeout_s=max(self.settings.mcp_gateway_timeout_s, 35.0),
+        )
+        return DocumentEditResult.model_validate(payload)
+
+    async def edit_xlsx_range(
+        self,
+        agent_id: str,
+        path: str,
+        sheet: str,
+        cell_range: str,
+        values: list[list[SpreadsheetCellValue]],
+        *,
+        expected_sha256: str,
+    ) -> DocumentEditResult:
+        body = XlsxRangeEditBody(
+            path=path,
+            sheet=sheet,
+            cell_range=cell_range,
+            values=values,
+            expected_sha256=expected_sha256,
+        )
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/documents/xlsx/edit-range",
+            json_body=body.model_dump(),
+            timeout_s=max(self.settings.mcp_gateway_timeout_s, 35.0),
+        )
+        return DocumentEditResult.model_validate(payload)
 
     async def preview_image(self, agent_id: str, path: str) -> ImagePreviewResult:
         payload = await self._request(
