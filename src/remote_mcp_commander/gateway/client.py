@@ -74,6 +74,7 @@ from remote_mcp_commander.protocol import (
     UploadChunkResult,
     UploadFinishResult,
     UploadStartResult,
+    UsageStatsResult,
     XlsxRangeEditBody,
 )
 
@@ -140,6 +141,13 @@ class GatewayClient:
             params["agent_id"] = agent_id
         payload = await self._request("GET", "/api/v1/audit", params=params)
         return AuditQueryResult.model_validate(payload)
+
+    async def get_usage_stats(self, *, agent_id: str | None = None) -> UsageStatsResult:
+        params: dict[str, Any] = {}
+        if agent_id is not None:
+            params["agent_id"] = agent_id
+        payload = await self._request("GET", "/api/v1/audit/usage", params=params)
+        return UsageStatsResult.model_validate(payload)
 
     async def get_operator_config(self) -> OperatorConfigSnapshot:
         payload = await self._request("GET", "/api/v1/operator-config")

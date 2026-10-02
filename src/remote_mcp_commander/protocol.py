@@ -1548,6 +1548,29 @@ class AuditQueryResult(BaseModel):
     scan_truncated: bool = False
 
 
+class UsageEventCount(BaseModel):
+    event: str = Field(min_length=1, max_length=128)
+    count: int = Field(ge=1)
+
+
+class UsageStatsResult(BaseModel):
+    records_scanned: int = Field(ge=0)
+    result_records: int = Field(ge=0)
+    successful_results: int = Field(ge=0)
+    failed_results: int = Field(ge=0)
+    rejected_results: int = Field(ge=0)
+    timed_out_results: int = Field(ge=0)
+    success_rate_pct: float | None = Field(default=None, ge=0, le=100)
+    latency_samples: int = Field(ge=0)
+    latency_avg_ms: float | None = Field(default=None, ge=0)
+    latency_p50_ms: float | None = Field(default=None, ge=0)
+    latency_p95_ms: float | None = Field(default=None, ge=0)
+    window_started_at: datetime | None = None
+    window_ended_at: datetime | None = None
+    events: list[UsageEventCount] = Field(default_factory=list)
+    scan_truncated: bool = False
+
+
 class RuntimeConfigResult(BaseModel):
     mcp_version: str
     agent_id: str

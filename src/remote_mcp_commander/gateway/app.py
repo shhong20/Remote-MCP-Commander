@@ -236,6 +236,7 @@ from remote_mcp_commander.protocol import (
     UploadStartBody,
     UploadStartRequest,
     UploadStartResult,
+    UsageStatsResult,
     XlsxRangeEditBody,
     XlsxRangeEditRequest,
 )
@@ -573,6 +574,22 @@ async def list_audit_records(
         max_scan_bytes=settings.audit_query_max_scan_bytes,
     )
     return AuditQueryResult(records=records, scan_truncated=truncated)
+
+
+@app.get(
+    "/api/v1/audit/usage",
+    dependencies=[Depends(require_control_token)],
+)
+async def get_audit_usage_stats(
+    settings: SettingsDep,
+    agent_id: Annotated[str | None, Query(max_length=128)] = None,
+) -> UsageStatsResult:
+    journal = configure_audit_for(settings)
+    return await asyncio.to_thread(
+        journal.usage_stats,
+        agent_id=agent_id,
+        max_scan_bytes=settings.audit_query_max_scan_bytes,
+    )
 
 
 @app.get(
