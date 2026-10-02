@@ -43,6 +43,7 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "list_directory",
         "list_directory_tree",
         "file_info",
+        "preview_document",
         "read_file",
         "read_file_lines",
         "tail_file",
@@ -101,6 +102,14 @@ async def test_execute_schema_requires_structured_argv() -> None:
     assert schema["required"] == ["agent_id", "argv"]
     assert "timeout_s" in schema["properties"]
     assert "timeout_s" not in schema["required"]
+
+    preview_schema = next(
+        tool for tool in result.tools if tool.name == "preview_document"
+    ).input_schema
+    assert set(preview_schema["required"]) == {"agent_id", "path"}
+    assert preview_schema["properties"]["page"]["default"] == 1
+    assert preview_schema["properties"]["max_pages"]["default"] == 5
+    assert preview_schema["properties"]["max_rows"]["default"] == 200
 
     batch_schema = next(
         tool for tool in result.tools if tool.name == "execute_many"

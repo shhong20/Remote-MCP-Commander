@@ -19,6 +19,7 @@ from remote_mcp_commander.protocol import (
     CommandSessionStdinCloseResult,
     DirectoryListResult,
     DirectoryTreeResult,
+    DocumentPreviewResult,
     FileAppendResult,
     FileEditResult,
     FileInfoResult,
@@ -477,6 +478,32 @@ class GatewayClient:
             json_body={"path": path},
         )
         return FileInfoResult.model_validate(payload)
+
+    async def preview_document(
+        self,
+        agent_id: str,
+        path: str,
+        *,
+        page: int = 1,
+        max_pages: int = 5,
+        sheet: str | None = None,
+        max_rows: int = 200,
+        max_chars: int = 65_536,
+    ) -> DocumentPreviewResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/documents/preview",
+            json_body={
+                "path": path,
+                "page": page,
+                "max_pages": max_pages,
+                "sheet": sheet,
+                "max_rows": max_rows,
+                "max_chars": max_chars,
+            },
+            timeout_s=max(self.settings.mcp_gateway_timeout_s, 25.0),
+        )
+        return DocumentPreviewResult.model_validate(payload)
 
     async def read_file(
         self,
