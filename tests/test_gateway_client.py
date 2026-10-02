@@ -1508,3 +1508,38 @@ async def test_xlsx_edit_client_rejects_oversized_utf8_payload_before_http() -> 
         )
 
     assert seen == []
+
+
+@pytest.mark.asyncio
+async def test_pdf_compose_client_uses_structured_route() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "pdf",
+                "output_path": "/home/ubuntu/result.pdf",
+                "pages_written": 3,
+                "bytes_written": 4096,
+                "sha256": "a" * 64,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    from remote_mcp_commander.protocol import PdfPageSource
+
+    result = await client.compose_pdf_pages(
+        "server-01",
+        "/home/ubuntu/result.pdf",
+        [PdfPageSource(path="/home/ubuntu/source.pdf", start_page=2, end_page=4)],
+    )
+
+    assert result.pages_written == 3
+    assert seen[0].method == "POST"
+    assert seen[0].url.path.endswith("/pdf/compose")
+    assert b'"output_path":"/home/ubuntu/result.pdf"' in seen[0].content
+    assert b'"start_page":2' in seen[0].content
+    assert b'"end_page":4' in seen[0].content
+    assert b'"overwrite":false' in seen[0].content

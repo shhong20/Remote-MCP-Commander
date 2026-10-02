@@ -69,6 +69,8 @@ from remote_mcp_commander.protocol import (
     OperatorConfigSnapshot,
     OperatorConfigUpdateResult,
     PathMutationResult,
+    PdfComposeResult,
+    PdfPageSource,
     PingResponse,
     PortLookupResult,
     ProcessInfoResult,
@@ -823,6 +825,26 @@ def build_mcp(settings: Settings) -> MCPServer:
             sheet,
             cell_range,
             values,
+            expected_sha256=expected_sha256,
+        )
+
+    @server.tool()
+    async def compose_pdf_pages(
+        agent_id: str,
+        output_path: Annotated[str, Field(min_length=1, max_length=4096)],
+        sources: Annotated[list[PdfPageSource], Field(min_length=1, max_length=16)],
+        overwrite: bool = False,
+        expected_sha256: Annotated[
+            str | None,
+            Field(default=None, min_length=64, max_length=64, pattern=r"^[a-f0-9]{64}$"),
+        ] = None,
+    ) -> PdfComposeResult:
+        """Create a new PDF by selecting and concatenating bounded page ranges."""
+        return await GatewayClient(settings).compose_pdf_pages(
+            agent_id,
+            output_path,
+            sources,
+            overwrite=overwrite,
             expected_sha256=expected_sha256,
         )
 
