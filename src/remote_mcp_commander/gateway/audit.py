@@ -14,7 +14,11 @@ from typing import Any
 
 import httpx
 
-from remote_mcp_commander.protocol import AuditVerificationResult
+from remote_mcp_commander.protocol import (
+    AuditVerificationResult,
+    UsageEventCount,
+    UsageStatsResult,
+)
 
 try:
     import fcntl
@@ -565,6 +569,168 @@ class AuditJournal:
                 if remaining <= 0 and path_index + 1 < len(paths):
                     scan_truncated = True
         return records, scan_truncated
+
+    def usage_stats(
+        self,
+        *,
+        agent_id: str | None = None,
+        max_scan_bytes: int = 2_097_152,
+    ) -> UsageStatsResult:
+        self.initialize()
+        remaining = max_scan_bytes
+        scan_truncated = False
+        records_scanned = 0
+        result_records = 0
+        successful_results = 0
+        failed_results = 0
+        rejected_results = 0
+        timed_out_results = 0
+        event_counts: dict[str, int] = {}
+        result_times: dict[str, datetime] = {}
+        latencies_ms: list[float] = []
+        window_started_at: datetime | None = None
+        window_ended_at: datetime | None = None
+
+        def parse_ts(value: Any) -> datetime | None:
+            if not isinstance(value, str):
+                return None
+            try:
+                parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+            except ValueError:
+                return None
+            if parsed.tzinfo is None:
+                parsed = parsed.replace(tzinfo=UTC)
+            return parsed.astimezone(UTC)
+
+        with self._lock:
+            paths = self._retained_paths_newest()
+            for path_index, path in enumerate(paths):
+                if remaining <= 0:
+                    scan_truncated = True
+                    break
+                with self._open_read(path) as handle:
+                    size = os.fstat(handle.fileno()).st_size
+                    take = min(size, remaining)
+                    start = size - take
+                    handle.seek(start)
+                    data = handle.read(take)
+                remaining -= take
+                if start:
+                    scan_truncated = True
+                    separator = data.find(b"\n")
+                    data = b"" if separator < 0 else data[separator + 1 :]
+
+                for raw_line in reversed(data.splitlines()):
+                    try:
+                        record = json.loads(raw_line)
+                    except (UnicodeDecodeError, json.JSONDecodeError):
+                        continue
+                    if not isinstance(record, dict):
+                        continue
+                    if agent_id is not None and record.get("agent_id") != agent_id:
+                        continue
+                    event = record.get("event")
+                    if not isinstance(event, str) or not event:
+                        continue
+                    records_scanned += 1
+                    event = event[:128]
+                    event_counts[event] = event_counts.get(event, 0) + 1
+
+                    ts = parse_ts(record.get("ts"))
+                    if ts is not None:
+                        if window_started_at is None or ts < window_started_at:
+                            window_started_at = ts
+                        if window_ended_at is None or ts > window_ended_at:
+                            window_ended_at = ts
+
+                    request_id = record.get("request_id")
+                    rejected = record.get("rejected") is True or event.endswith("_denied")
+                    timed_out = record.get("timed_out") is True
+                    returncode = record.get("returncode")
+                    error = record.get("error")
+                    is_result = (
+                        "rejected" in record
+                        or "timed_out" in record
+                        or "returncode" in record
+                        or "error" in record
+                        or event.endswith("_denied")
+                        or event.endswith("_failed")
+                    )
+                    if is_result:
+                        result_records += 1
+                        if rejected:
+                            rejected_results += 1
+                        if timed_out:
+                            timed_out_results += 1
+                        failed = (
+                            rejected
+                            or timed_out
+                            or (isinstance(returncode, int) and returncode != 0)
+                            or error not in (None, "")
+                            or event.endswith("_failed")
+                        )
+                        if failed:
+                            failed_results += 1
+                        else:
+                            successful_results += 1
+                        if isinstance(request_id, str) and request_id and ts is not None:
+                            result_times.setdefault(request_id, ts)
+                    elif (
+                        event.endswith("_requested")
+                        and isinstance(request_id, str)
+                        and request_id
+                        and ts is not None
+                    ):
+                        finished_at = result_times.pop(request_id, None)
+                        if finished_at is not None and finished_at >= ts:
+                            latency = (finished_at - ts).total_seconds() * 1000.0
+                            if latency <= 86_400_000:
+                                latencies_ms.append(latency)
+
+                if remaining <= 0 and path_index + 1 < len(paths):
+                    scan_truncated = True
+
+        latencies_ms.sort()
+
+        def percentile(fraction: float) -> float | None:
+            if not latencies_ms:
+                return None
+            index = min(
+                len(latencies_ms) - 1,
+                max(0, int(len(latencies_ms) * fraction + 0.999999) - 1),
+            )
+            return round(latencies_ms[index], 3)
+
+        success_rate = None
+        if result_records:
+            success_rate = round(successful_results * 100.0 / result_records, 2)
+        events = [
+            UsageEventCount(event=event, count=count)
+            for event, count in sorted(
+                event_counts.items(), key=lambda item: (-item[1], item[0])
+            )[:100]
+        ]
+        return UsageStatsResult(
+            records_scanned=records_scanned,
+            result_records=result_records,
+            successful_results=successful_results,
+            failed_results=failed_results,
+            rejected_results=rejected_results,
+            timed_out_results=timed_out_results,
+            success_rate_pct=success_rate,
+            latency_samples=len(latencies_ms),
+            latency_avg_ms=(
+                round(sum(latencies_ms) / len(latencies_ms), 3)
+                if latencies_ms
+                else None
+            ),
+            latency_p50_ms=percentile(0.50),
+            latency_p95_ms=percentile(0.95),
+            window_started_at=window_started_at,
+            window_ended_at=window_ended_at,
+            events=events,
+            scan_truncated=scan_truncated,
+        )
 
 
 _journal: AuditJournal | None = None

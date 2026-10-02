@@ -66,6 +66,36 @@ async def test_list_audit_records_sends_bounded_filters() -> None:
 
 
 @pytest.mark.asyncio
+async def test_get_usage_stats_sends_optional_agent_filter() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/audit/usage"
+        assert request.url.params["agent_id"] == "server-01"
+        return httpx.Response(
+            200,
+            json={
+                "records_scanned": 10,
+                "result_records": 4,
+                "successful_results": 3,
+                "failed_results": 1,
+                "rejected_results": 1,
+                "timed_out_results": 0,
+                "success_rate_pct": 75.0,
+                "latency_samples": 2,
+                "latency_avg_ms": 20.0,
+                "latency_p50_ms": 10.0,
+                "latency_p95_ms": 30.0,
+                "events": [{"event": "command_completed", "count": 3}],
+                "scan_truncated": False,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    result = await client.get_usage_stats(agent_id="server-01")
+    assert result.success_rate_pct == 75.0
+    assert result.events[0].event == "command_completed"
+
+
+@pytest.mark.asyncio
 async def test_gateway_error_preserves_status_and_detail() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(403, json={"detail": "policy denied"})

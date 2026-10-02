@@ -102,6 +102,7 @@ from remote_mcp_commander.protocol import (
     UploadChunkResult,
     UploadFinishResult,
     UploadStartResult,
+    UsageStatsResult,
 )
 
 
@@ -497,6 +498,11 @@ def build_mcp(settings: Settings) -> MCPServer:
         return await GatewayClient(settings).list_audit_records(
             limit=limit, event=event, agent_id=agent_id
         )
+
+    @server.tool()
+    async def get_usage_stats(agent_id: str | None = None) -> UsageStatsResult:
+        """Summarize bounded local audit usage without returning raw operation payloads."""
+        return await GatewayClient(settings).get_usage_stats(agent_id=agent_id)
 
     @server.tool()
     async def ping_device(agent_id: str) -> PingResponse:

@@ -52,6 +52,7 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "get_operator_config",
         "set_operator_config",
         "get_recent_activity",
+        "get_usage_stats",
         "ping_device",
         "system_health",
         "lookup_port",
@@ -307,6 +308,12 @@ async def test_execute_schema_requires_structured_argv() -> None:
     assert activity_schema["properties"]["limit"]["default"] == 50
     assert "event" not in activity_schema.get("required", [])
     assert "agent_id" not in activity_schema.get("required", [])
+
+    usage_schema = next(
+        tool for tool in result.tools if tool.name == "get_usage_stats"
+    ).input_schema
+    assert usage_schema.get("required", []) == []
+    assert usage_schema["properties"]["agent_id"]["default"] is None
 
 
 def test_streamable_http_requires_mcp_token() -> None:
