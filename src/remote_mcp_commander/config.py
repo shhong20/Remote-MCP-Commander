@@ -13,6 +13,7 @@ from urllib.parse import urlparse
 from pydantic import Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from remote_mcp_commander.operator_config import read_operator_overrides
 from remote_mcp_commander.policy import (
     PERSONAL_GENERIC_EXECUTABLES,
     PERSONAL_PTY_EXECUTABLES,
@@ -40,6 +41,7 @@ class Settings(BaseSettings):
     audit_remote_required: bool = False
     audit_remote_timeout_s: float = Field(default=2.0, ge=0.1, le=30.0)
     registry_path: str = "~/.remote-mcp-commander/registry.json"
+    operator_config_path: str = "~/.remote-mcp-commander/operator-config.json"
     enrollment_ttl_s: int = Field(default=300, ge=30, le=3600)
     bind_host: str = "127.0.0.1"
     bind_port: int = 8765
@@ -189,6 +191,10 @@ class Settings(BaseSettings):
         return Path(self.audit_path).expanduser()
 
     @property
+    def operator_config_file(self) -> Path:
+        return Path(self.operator_config_path).expanduser()
+
+    @property
     def agent_token_path(self) -> Path:
         return Path(self.agent_token_file).expanduser()
 
@@ -312,6 +318,19 @@ class Settings(BaseSettings):
                 raise ValueError("COMMANDER_MCP_SCOPE must be one non-empty OAuth scope")
 
 
+def apply_operator_overrides(
+    base: Settings, overrides: dict[str, int | float]
+) -> Settings:
+    values = base.model_dump()
+    values.update(overrides)
+    resolved = Settings(**values)
+    if resolved.session_history_limit < resolved.session_max_active:
+        raise ValueError("session history limit must be >= max active sessions")
+    return resolved
+
+
 @lru_cache
 def get_settings() -> Settings:
-    return Settings()
+    base = Settings()
+    overrides = read_operator_overrides(base.operator_config_file)
+    return apply_operator_overrides(base, overrides)

@@ -49,6 +49,8 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "list_commands",
         "device_info",
         "get_runtime_config",
+        "get_operator_config",
+        "set_operator_config",
         "get_recent_activity",
         "ping_device",
         "system_health",
@@ -245,6 +247,19 @@ async def test_execute_schema_requires_structured_argv() -> None:
         tool for tool in result.tools if tool.name == "get_runtime_config"
     ).input_schema
     assert config_schema["required"] == ["agent_id"]
+
+    operator_get_schema = next(
+        tool for tool in result.tools if tool.name == "get_operator_config"
+    ).input_schema
+    assert operator_get_schema.get("required", []) == []
+
+    operator_set_schema = next(
+        tool for tool in result.tools if tool.name == "set_operator_config"
+    ).input_schema
+    assert operator_set_schema["required"] == ["key"]
+    assert operator_set_schema["properties"]["value"]["default"] is None
+    assert "allowed_roots_json" not in operator_set_schema["properties"]["key"]["enum"]
+    assert "control_token" not in operator_set_schema["properties"]["key"]["enum"]
 
     activity_schema = next(
         tool for tool in result.tools if tool.name == "get_recent_activity"
