@@ -45,6 +45,7 @@ from remote_mcp_commander.protocol import (
     CommandSessionStdinCloseResult,
     DirectoryListResult,
     DirectoryTreeResult,
+    DocumentEditResult,
     DocumentPreviewResult,
     DownloadChunkResult,
     DownloadStartResult,
@@ -90,6 +91,7 @@ from remote_mcp_commander.protocol import (
     ServiceStatusResult,
     SessionListResult,
     SessionSignalResult,
+    SpreadsheetRow,
     SystemHealthResult,
     TransferCloseResult,
     TransferStatusResult,
@@ -777,6 +779,51 @@ def build_mcp(settings: Settings) -> MCPServer:
             cell_range=cell_range,
             max_rows=max_rows,
             max_chars=max_chars,
+        )
+
+    @server.tool()
+    async def replace_docx_text(
+        agent_id: str,
+        path: Annotated[str, Field(min_length=1, max_length=4096)],
+        old_text: Annotated[str, Field(min_length=1, max_length=8192)],
+        new_text: Annotated[str, Field(max_length=8192)],
+        expected_sha256: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")],
+        expected_replacements: Annotated[int, Field(ge=1, le=100)] = 1,
+    ) -> DocumentEditResult:
+        """Replace exact DOCX paragraph text with SHA-guarded atomic publication."""
+        return await GatewayClient(settings).replace_docx_text(
+            agent_id,
+            path,
+            old_text,
+            new_text,
+            expected_sha256=expected_sha256,
+            expected_replacements=expected_replacements,
+        )
+
+    @server.tool()
+    async def edit_xlsx_range(
+        agent_id: str,
+        path: Annotated[str, Field(min_length=1, max_length=4096)],
+        sheet: Annotated[str, Field(min_length=1, max_length=128)],
+        cell_range: Annotated[
+            str,
+            Field(
+                min_length=5,
+                max_length=32,
+                pattern=r"^[A-Za-z]{1,3}[1-9][0-9]{0,6}:[A-Za-z]{1,3}[1-9][0-9]{0,6}$",
+            ),
+        ],
+        values: Annotated[list[SpreadsheetRow], Field(min_length=1, max_length=100)],
+        expected_sha256: Annotated[str, Field(pattern=r"^[a-f0-9]{64}$")],
+    ) -> DocumentEditResult:
+        """Replace one XLSX rectangular range without evaluating formulas or macros."""
+        return await GatewayClient(settings).edit_xlsx_range(
+            agent_id,
+            path,
+            sheet,
+            cell_range,
+            values,
+            expected_sha256=expected_sha256,
         )
 
     @server.tool()

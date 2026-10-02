@@ -66,6 +66,7 @@ def test_capabilities_reflect_available_tools_and_allowed_roots(
         "file.transfer_upload",
         "file.transfer_download",
         "document.preview",
+        "document.edit",
         "image.preview",
         "file.write",
         "file.append",

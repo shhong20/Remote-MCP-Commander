@@ -54,6 +54,7 @@ def detect_capabilities(settings: Settings, roots: list[Path]) -> list[str]:
                 "file.transfer_upload",
                 "file.transfer_download",
                 "document.preview",
+                "document.edit",
                 "image.preview",
                 "file.write",
                 "file.append",

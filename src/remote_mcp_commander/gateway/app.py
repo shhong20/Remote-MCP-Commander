@@ -90,9 +90,12 @@ from remote_mcp_commander.protocol import (
     DirectoryTreeBody,
     DirectoryTreeRequest,
     DirectoryTreeResult,
+    DocumentEditResult,
     DocumentPreviewBody,
     DocumentPreviewRequest,
     DocumentPreviewResult,
+    DocxTextReplaceBody,
+    DocxTextReplaceRequest,
     DownloadChunkBody,
     DownloadChunkRequest,
     DownloadChunkResult,
@@ -230,6 +233,8 @@ from remote_mcp_commander.protocol import (
     UploadStartBody,
     UploadStartRequest,
     UploadStartResult,
+    XlsxRangeEditBody,
+    XlsxRangeEditRequest,
 )
 
 AgentReply = (
@@ -247,6 +252,7 @@ AgentReply = (
     | TransferStatusResult
     | TransferCloseResult
     | DocumentPreviewResult
+    | DocumentEditResult
     | ImagePreviewResult
     | FileLineReadResult
     | FileTailResult
@@ -1929,6 +1935,101 @@ async def preview_agent_document(
 
 
 @app.post(
+    "/api/v1/agents/{agent_id}/documents/docx/replace-text",
+    dependencies=[Depends(require_control_token)],
+)
+async def replace_agent_docx_text(
+    agent_id: str, body: DocxTextReplaceBody, settings: SettingsDep
+) -> DocumentEditResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "document.edit")
+    audit_required(
+        "document_edit_requested",
+        agent_id=agent_id,
+        path=body.path,
+        kind="docx",
+        operation="replace_text",
+        expected_replacements=body.expected_replacements,
+    )
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = DocxTextReplaceRequest(request_id=request_id, **body.model_dump())
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=max(settings.request_timeout_s, 30.0))
+        if not isinstance(reply, DocumentEditResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "document_edit",
+            agent_id=agent_id,
+            path=body.path,
+            kind="docx",
+            operation="replace_text",
+            replacements=reply.replacements,
+            bytes_written=reply.bytes_written,
+            rejected=reply.rejected,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent DOCX edit timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/documents/xlsx/edit-range",
+    dependencies=[Depends(require_control_token)],
+)
+async def edit_agent_xlsx_range(
+    agent_id: str, body: XlsxRangeEditBody, settings: SettingsDep
+) -> DocumentEditResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "document.edit")
+    audit_required(
+        "document_edit_requested",
+        agent_id=agent_id,
+        path=body.path,
+        kind="xlsx",
+        operation="edit_range",
+        sheet=body.sheet,
+        cell_range=body.cell_range,
+    )
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = XlsxRangeEditRequest(request_id=request_id, **body.model_dump())
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=max(settings.request_timeout_s, 30.0))
+        if not isinstance(reply, DocumentEditResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "document_edit",
+            agent_id=agent_id,
+            path=body.path,
+            kind="xlsx",
+            operation="edit_range",
+            sheet=body.sheet,
+            cell_range=body.cell_range,
+            cells_updated=reply.cells_updated,
+            bytes_written=reply.bytes_written,
+            rejected=reply.rejected,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent XLSX edit timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
     "/api/v1/agents/{agent_id}/images/preview",
     dependencies=[Depends(require_control_token)],
 )
@@ -3402,6 +3503,8 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
                 reply = TransferCloseResult.model_validate(payload)
             elif message_type == "document_preview_result":
                 reply = DocumentPreviewResult.model_validate(payload)
+            elif message_type == "document_edit_result":
+                reply = DocumentEditResult.model_validate(payload)
             elif message_type == "image_preview_result":
                 reply = ImagePreviewResult.model_validate(payload)
             elif message_type == "file_line_read_result":

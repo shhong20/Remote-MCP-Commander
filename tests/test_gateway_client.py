@@ -1437,3 +1437,74 @@ async def test_operator_config_client_posts_one_allowlisted_value() -> None:
     assert seen[0].method == "POST"
     assert seen[0].url.path == "/api/v1/operator-config"
     assert seen[0].content == b'{"key":"max_output_bytes","value":131072}'
+
+
+@pytest.mark.asyncio
+async def test_document_edit_client_uses_structured_routes() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        kind = "docx" if request.url.path.endswith("/replace-text") else "xlsx"
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "edit",
+                "path": "/home/ubuntu/document." + kind,
+                "kind": kind,
+                "replacements": 1 if kind == "docx" else 0,
+                "cells_updated": 0 if kind == "docx" else 4,
+                "bytes_written": 1234,
+                "sha256": "a" * 64,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    docx = await client.replace_docx_text(
+        "server-01",
+        "/home/ubuntu/document.docx",
+        "Old",
+        "New",
+        expected_sha256="1" * 64,
+        expected_replacements=1,
+    )
+    xlsx = await client.edit_xlsx_range(
+        "server-01",
+        "/home/ubuntu/document.xlsx",
+        "Data",
+        "A1:B2",
+        [[1, 2], [3, 4]],
+        expected_sha256="2" * 64,
+    )
+
+    assert docx.replacements == 1
+    assert xlsx.cells_updated == 4
+    assert seen[0].url.path.endswith("/documents/docx/replace-text")
+    assert b'"old_text":"Old"' in seen[0].content
+    assert b'"expected_sha256":"1111111111111111' in seen[0].content
+    assert seen[1].url.path.endswith("/documents/xlsx/edit-range")
+    assert b'"cell_range":"A1:B2"' in seen[1].content
+    assert b'"values":[[1,2],[3,4]]' in seen[1].content
+
+
+@pytest.mark.asyncio
+async def test_xlsx_edit_client_rejects_oversized_utf8_payload_before_http() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(500)
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    large_row = ["😀" * 512 for _ in range(32)]
+    with pytest.raises(ValueError, match="UTF-8 byte limit"):
+        await client.edit_xlsx_range(
+            "server-01",
+            "/home/ubuntu/document.xlsx",
+            "Data",
+            "A1:AF9",
+            [list(large_row) for _ in range(9)],
+            expected_sha256="2" * 64,
+        )
+
+    assert seen == []
