@@ -128,6 +128,9 @@ from remote_mcp_commander.protocol import (
     GitStatusRequest,
     GitStatusResult,
     Heartbeat,
+    ImagePreviewBody,
+    ImagePreviewRequest,
+    ImagePreviewResult,
     PathMutationBody,
     PathMutationRequest,
     PathMutationResult,
@@ -202,6 +205,7 @@ AgentReply = (
     | PingResult
     | FileReadResult
     | DocumentPreviewResult
+    | ImagePreviewResult
     | FileLineReadResult
     | FileTailResult
     | FileReadManyResult
@@ -1804,6 +1808,44 @@ async def preview_agent_document(
 
 
 @app.post(
+    "/api/v1/agents/{agent_id}/images/preview",
+    dependencies=[Depends(require_control_token)],
+)
+async def preview_agent_image(
+    agent_id: str, body: ImagePreviewBody, settings: SettingsDep
+) -> ImagePreviewResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "image.preview")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = ImagePreviewRequest(request_id=request_id, **body.model_dump())
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=settings.request_timeout_s)
+        if not isinstance(reply, ImagePreviewResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "image_preview",
+            agent_id=agent_id,
+            path=body.path,
+            format=reply.format,
+            size=reply.size,
+            width=reply.width,
+            height=reply.height,
+            rejected=reply.rejected,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent image preview timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
     "/api/v1/agents/{agent_id}/files/read-lines",
     dependencies=[Depends(require_control_token)],
 )
@@ -2842,6 +2884,8 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
                 reply = FileReadResult.model_validate(payload)
             elif message_type == "document_preview_result":
                 reply = DocumentPreviewResult.model_validate(payload)
+            elif message_type == "image_preview_result":
+                reply = ImagePreviewResult.model_validate(payload)
             elif message_type == "file_line_read_result":
                 reply = FileLineReadResult.model_validate(payload)
             elif message_type == "file_tail_result":

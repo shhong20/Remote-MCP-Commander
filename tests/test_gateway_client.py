@@ -1138,3 +1138,36 @@ async def test_preview_document_client_sends_range_options() -> None:
     assert b'"sheet":"Data"' in seen[0].content
     assert b'"cell_range":"B1:B1"' in seen[0].content
     assert b'"max_rows":1' in seen[0].content
+
+
+@pytest.mark.asyncio
+async def test_preview_image_client_uses_bounded_image_route() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "request_id": "image",
+                "path": "/home/ubuntu/sample.png",
+                "format": "png",
+                "mime_type": "image/png",
+                "data_base64": "AA==",
+                "size": 1,
+                "width": 1,
+                "height": 1,
+                "sha256": "a" * 64,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    result = await client.preview_image("server-01", "/home/ubuntu/sample.png")
+
+    assert result.format == "png"
+    assert result.mime_type == "image/png"
+    assert result.width == 1
+    assert result.height == 1
+    assert seen[0].method == "POST"
+    assert seen[0].url.path.endswith("/images/preview")
+    assert seen[0].content == b'{"path":"/home/ubuntu/sample.png"}'

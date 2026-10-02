@@ -34,6 +34,7 @@ from remote_mcp_commander.protocol import (
     FileTailResult,
     FileWriteResult,
     GitStatusResult,
+    ImagePreviewResult,
     PathMutationResult,
     PingResponse,
     PortLookupResult,
@@ -506,6 +507,15 @@ class GatewayClient:
             timeout_s=max(self.settings.mcp_gateway_timeout_s, 25.0),
         )
         return DocumentPreviewResult.model_validate(payload)
+
+    async def preview_image(self, agent_id: str, path: str) -> ImagePreviewResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/images/preview",
+            json_body={"path": path},
+            timeout_s=max(self.settings.mcp_gateway_timeout_s, 15.0),
+        )
+        return ImagePreviewResult.model_validate(payload)
 
     async def read_file(
         self,
