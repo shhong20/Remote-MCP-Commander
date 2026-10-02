@@ -9,6 +9,8 @@ from remote_mcp_commander.protocol import (
     AgentInfo,
     AgentList,
     AuditQueryResult,
+    BinaryReadResult,
+    BinaryWriteResult,
     CommandDiscoveryResult,
     CommandResult,
     CommandSessionDiscardResult,
@@ -531,6 +533,42 @@ class GatewayClient:
             json_body={"path": path, "offset": offset, "max_bytes": max_bytes},
         )
         return FileReadResult.model_validate(payload)
+
+    async def read_binary_file(
+        self,
+        agent_id: str,
+        path: str,
+        *,
+        offset: int = 0,
+        max_bytes: int = 262_144,
+    ) -> BinaryReadResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/files/read-binary",
+            json_body={"path": path, "offset": offset, "max_bytes": max_bytes},
+        )
+        return BinaryReadResult.model_validate(payload)
+
+    async def write_binary_file(
+        self,
+        agent_id: str,
+        path: str,
+        data_base64: str,
+        *,
+        overwrite: bool = False,
+        expected_sha256: str | None = None,
+    ) -> BinaryWriteResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/files/write-binary",
+            json_body={
+                "path": path,
+                "data_base64": data_base64,
+                "overwrite": overwrite,
+                "expected_sha256": expected_sha256,
+            },
+        )
+        return BinaryWriteResult.model_validate(payload)
 
     async def read_file_lines(
         self, agent_id: str, path: str, *, offset: int = 0, max_lines: int = 200

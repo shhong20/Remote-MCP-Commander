@@ -63,10 +63,12 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "preview_image",
         "read_multiple_files",
         "read_file",
+        "read_binary",
         "read_file_lines",
         "tail_file",
         "read_files",
         "write_file",
+        "write_binary",
         "append_file",
         "edit_file",
         "search_files",
@@ -160,6 +162,23 @@ async def test_execute_schema_requires_structured_argv() -> None:
     assert multi_spec["properties"]["max_chars"]["maximum"] == 65_536
     assert multi_spec["properties"]["max_bytes"]["default"] == 32_768
     assert multi_spec["properties"]["max_bytes"]["maximum"] == 65_536
+
+    binary_read_schema = next(
+        tool for tool in result.tools if tool.name == "read_binary"
+    ).input_schema
+    assert set(binary_read_schema["required"]) == {"agent_id", "path"}
+    assert binary_read_schema["properties"]["offset"]["default"] == 0
+    assert binary_read_schema["properties"]["offset"]["maximum"] == 1_048_576
+    assert binary_read_schema["properties"]["max_bytes"]["default"] == 262_144
+    assert binary_read_schema["properties"]["max_bytes"]["maximum"] == 262_144
+
+    binary_write_schema = next(
+        tool for tool in result.tools if tool.name == "write_binary"
+    ).input_schema
+    assert set(binary_write_schema["required"]) == {"agent_id", "path", "data_base64"}
+    assert binary_write_schema["properties"]["data_base64"]["maxLength"] == 1_398_104
+    assert binary_write_schema["properties"]["overwrite"]["default"] is False
+    assert binary_write_schema["properties"]["expected_sha256"]["default"] is None
 
     batch_schema = next(
         tool for tool in result.tools if tool.name == "execute_many"
