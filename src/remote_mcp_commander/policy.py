@@ -120,7 +120,12 @@ def generic_executables_for_mode(mode: str) -> frozenset[str]:
     return PERSONAL_GENERIC_EXECUTABLES if mode == "personal" else SAFE_GENERIC_EXECUTABLES
 
 
-def validate_generic_argv(argv: list[str], *, mode: str = "hardened") -> str | None:
+def validate_generic_argv(
+    argv: list[str],
+    *,
+    mode: str = "hardened",
+    personal_allowlist: set[str] | frozenset[str] | None = None,
+) -> str | None:
     if not argv:
         return "empty argv"
     executable = Path(argv[0]).name
@@ -129,6 +134,8 @@ def validate_generic_argv(argv: list[str], *, mode: str = "hardened") -> str | N
     if any("\x00" in argument for argument in argv):
         return "generic arguments must not contain NUL bytes"
     allowed = generic_executables_for_mode(mode)
+    if mode == "personal" and personal_allowlist is not None:
+        allowed = allowed.union(personal_allowlist)
     if executable not in allowed:
         if mode == "hardened":
             return f"executable has no safe generic profile: {executable}"

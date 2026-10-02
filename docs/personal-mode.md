@@ -50,3 +50,10 @@ The Personal generic profile also includes common development and operations uti
 Some broad privilege, raw-process, and low-level storage commands remain intentionally outside the generic profile. Managed process and session signaling should use the structured `signal_process` and `signal_session` paths so PID identity checks and audit safeguards remain in effect.
 
 This profile boundary is a structured-API preference, not an OS sandbox guarantee. Personal mode already permits user-level command composition through the explicitly supported shell profiles, and every child process remains limited to the permissions of the OS account running the Agent.
+
+
+## Custom generic command profiles
+
+Personal mode can extend the built-in generic command set without a code change by adding bare executable names to `COMMANDER_ALLOWED_EXECUTABLES` on both the Gateway and Agent. For example, `COMMANDER_ALLOWED_EXECUTABLES=uv,poetry` makes those names eligible for the generic command path when they resolve in the Agent user's effective `PATH`.
+
+Custom profiles remain fail-closed: names must be bare executable names, the Gateway must allow the same name, the Agent allowlist must contain it, and the executable must resolve on the Agent. Hardened mode ignores custom widening and remains limited to the built-in safe generic profiles. This mechanism does not bypass OS permissions or the existing cwd/env/output/session bounds.

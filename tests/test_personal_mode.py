@@ -99,3 +99,21 @@ def test_personal_mode_allows_common_developer_and_ops_profiles(name: str) -> No
 @pytest.mark.parametrize("name", ["sudo", "kill", "pkill", "dd", "mkfs", "mount"])
 def test_personal_mode_keeps_high_risk_or_duplicate_profiles_blocked(name: str) -> None:
     assert validate_generic_argv([name], mode="personal") is not None
+
+
+def test_personal_mode_accepts_configured_custom_generic_profile() -> None:
+    assert (
+        validate_generic_argv(
+            ["uv", "--version"], mode="personal", personal_allowlist={"uv"}
+        )
+        is None
+    )
+
+
+def test_hardened_mode_ignores_personal_custom_generic_profile() -> None:
+    assert (
+        validate_generic_argv(
+            ["uv", "--version"], mode="hardened", personal_allowlist={"uv"}
+        )
+        is not None
+    )

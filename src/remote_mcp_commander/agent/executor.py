@@ -74,7 +74,9 @@ async def execute_argv(
     roots: list[Path] | None = None,
 ) -> CommandResult:
     executable = Path(argv[0]).name
-    policy_error = validate_generic_argv(argv, mode=policy_mode)
+    policy_error = validate_generic_argv(
+        argv, mode=policy_mode, personal_allowlist=allowlist
+    )
     if policy_error is not None:
         return CommandResult(request_id=request_id, rejected=True, error=policy_error)
     if executable not in allowlist:
