@@ -61,6 +61,7 @@ def test_capabilities_reflect_available_tools_and_allowed_roots(
         "file.read_lines",
         "file.tail",
         "file.read_many",
+        "document.preview",
         "file.write",
         "file.append",
         "file.edit",

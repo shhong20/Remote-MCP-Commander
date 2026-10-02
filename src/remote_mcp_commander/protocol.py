@@ -192,6 +192,38 @@ class FileReadResult(BaseModel):
     error: str | None = None
 
 
+DocumentKind = Literal["pdf", "docx", "xlsx"]
+
+
+class DocumentPreviewRequest(BaseModel):
+    type: Literal["document_preview_request"] = "document_preview_request"
+    request_id: str
+    path: str = Field(min_length=1, max_length=4096)
+    page: int = Field(default=1, ge=1, le=100_000)
+    max_pages: int = Field(default=5, ge=1, le=20)
+    sheet: str | None = Field(default=None, min_length=1, max_length=128)
+    max_rows: int = Field(default=200, ge=1, le=1000)
+    max_chars: int = Field(default=65_536, ge=1024, le=262_144)
+
+
+class DocumentPreviewResult(BaseModel):
+    type: Literal["document_preview_result"] = "document_preview_result"
+    request_id: str
+    path: str = ""
+    kind: DocumentKind | None = None
+    content: str = ""
+    size: int = 0
+    sha256: str | None = None
+    page: int | None = None
+    pages_requested: int | None = None
+    sheets: list[str] = Field(default_factory=list)
+    sheet: str | None = None
+    rows_returned: int = 0
+    truncated: bool = False
+    rejected: bool = False
+    error: str | None = None
+
+
 class FileReadManyRequest(BaseModel):
     type: Literal["file_read_many_request"] = "file_read_many_request"
     request_id: str
@@ -356,6 +388,15 @@ class FileReadBody(BaseModel):
     path: str = Field(min_length=1, max_length=4096)
     offset: int = Field(default=0, ge=0)
     max_bytes: int = Field(default=65_536, ge=4, le=262_144)
+
+
+class DocumentPreviewBody(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+    page: int = Field(default=1, ge=1, le=100_000)
+    max_pages: int = Field(default=5, ge=1, le=20)
+    sheet: str | None = Field(default=None, min_length=1, max_length=128)
+    max_rows: int = Field(default=200, ge=1, le=1000)
+    max_chars: int = Field(default=65_536, ge=1024, le=262_144)
 
 
 class FileWriteBody(BaseModel):

@@ -10,6 +10,7 @@ import websockets
 from remote_mcp_commander import __version__
 from remote_mcp_commander.agent.capabilities import detect_capabilities, discover_commands
 from remote_mcp_commander.agent.diagnostics import lookup_port, service_logs, system_health
+from remote_mcp_commander.agent.document_ops import preview_document
 from remote_mcp_commander.agent.edit_ops import edit_text_file
 from remote_mcp_commander.agent.file_ops import (
     allowed_roots,
@@ -63,6 +64,7 @@ from remote_mcp_commander.protocol import (
     CommandSessionStdinCloseRequest,
     DirectoryListRequest,
     DirectoryTreeRequest,
+    DocumentPreviewRequest,
     FileAppendRequest,
     FileEditRequest,
     FileInfoRequest,
@@ -487,6 +489,21 @@ async def agent_loop() -> None:
                                 offset=request.offset,
                                 max_bytes=request.max_bytes,
                                 max_file_bytes=settings.file_max_bytes,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "document_preview_request":
+                            request = DocumentPreviewRequest.model_validate(payload)
+                            result = await preview_document(
+                                request.request_id,
+                                request.path,
+                                roots=roots,
+                                page=request.page,
+                                max_pages=request.max_pages,
+                                sheet=request.sheet,
+                                max_rows=request.max_rows,
+                                max_chars=request.max_chars,
                             )
                             await websocket.send(result.model_dump_json())
                             continue

@@ -31,6 +31,7 @@ from remote_mcp_commander.protocol import (
     CommandSessionStdinCloseResult,
     DirectoryListResult,
     DirectoryTreeResult,
+    DocumentPreviewResult,
     FileAppendResult,
     FileEditResult,
     FileInfoResult,
@@ -452,6 +453,27 @@ def build_mcp(settings: Settings) -> MCPServer:
     async def file_info(agent_id: str, path: str) -> FileInfoResult:
         """Read lstat-style metadata for one path without following the final symlink."""
         return await GatewayClient(settings).file_info(agent_id, path)
+
+    @server.tool()
+    async def preview_document(
+        agent_id: str,
+        path: str,
+        page: int = 1,
+        max_pages: int = 5,
+        sheet: str | None = None,
+        max_rows: int = 200,
+        max_chars: int = 65_536,
+    ) -> DocumentPreviewResult:
+        """Preview bounded text from PDF, DOCX, or XLSX inside Agent allowed roots."""
+        return await GatewayClient(settings).preview_document(
+            agent_id,
+            path,
+            page=page,
+            max_pages=max_pages,
+            sheet=sheet,
+            max_rows=max_rows,
+            max_chars=max_chars,
+        )
 
     @server.tool()
     async def read_file(
