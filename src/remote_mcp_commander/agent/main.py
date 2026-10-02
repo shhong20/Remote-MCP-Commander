@@ -28,6 +28,7 @@ from remote_mcp_commander.agent.filesystem_ops import (
     list_file_roots,
 )
 from remote_mcp_commander.agent.git_ops import git_status
+from remote_mcp_commander.agent.image_ops import preview_image
 from remote_mcp_commander.agent.line_wait_dispatcher import LineOutputWaitDispatcher
 from remote_mcp_commander.agent.one_shot import OneShotCommandDispatcher
 from remote_mcp_commander.agent.path_ops import mutate_path
@@ -81,6 +82,7 @@ from remote_mcp_commander.protocol import (
     FileWriteRequest,
     GitStatusRequest,
     Heartbeat,
+    ImagePreviewRequest,
     PathMutationRequest,
     PingRequest,
     PingResult,
@@ -505,6 +507,16 @@ async def agent_loop() -> None:
                                 cell_range=request.cell_range,
                                 max_rows=request.max_rows,
                                 max_chars=request.max_chars,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "image_preview_request":
+                            request = ImagePreviewRequest.model_validate(payload)
+                            result = await preview_image(
+                                request.request_id,
+                                request.path,
+                                roots=roots,
                             )
                             await websocket.send(result.model_dump_json())
                             continue

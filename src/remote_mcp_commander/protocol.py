@@ -268,6 +268,33 @@ class BatchDocumentPreviewResult(BaseModel):
     results: list[BatchDocumentPreviewItemResult] = Field(default_factory=list)
 
 
+ImageFormat = Literal["png", "jpeg", "gif", "webp"]
+ImageMimeType = Literal["image/png", "image/jpeg", "image/gif", "image/webp"]
+
+
+class ImagePreviewRequest(BaseModel):
+    type: Literal["image_preview_request"] = "image_preview_request"
+    request_id: str
+    path: str = Field(min_length=1, max_length=4096)
+
+
+class ImagePreviewResult(BaseModel):
+    type: Literal["image_preview_result"] = "image_preview_result"
+    request_id: str
+    path: str = ""
+    format: ImageFormat | None = None
+    mime_type: ImageMimeType | None = None
+    data_base64: str = Field(default="", max_length=1_398_104)
+    size: int = Field(default=0, ge=0, le=1_048_576)
+    width: int = Field(default=0, ge=0, le=8192)
+    height: int = Field(default=0, ge=0, le=8192)
+    sha256: str | None = Field(
+        default=None, min_length=64, max_length=64, pattern=r"^[0-9a-f]{64}$"
+    )
+    rejected: bool = False
+    error: str | None = None
+
+
 class FileReadManyRequest(BaseModel):
     type: Literal["file_read_many_request"] = "file_read_many_request"
     request_id: str
@@ -432,6 +459,10 @@ class FileReadBody(BaseModel):
     path: str = Field(min_length=1, max_length=4096)
     offset: int = Field(default=0, ge=0)
     max_bytes: int = Field(default=65_536, ge=4, le=262_144)
+
+
+class ImagePreviewBody(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
 
 
 class DocumentPreviewBody(BaseModel):

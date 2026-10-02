@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import binascii
 import secrets
 from typing import Annotated
 from urllib.parse import urlparse
@@ -8,6 +10,8 @@ from urllib.parse import urlparse
 from mcp.server import MCPServer
 from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.auth.settings import AuthSettings
+from mcp.server.mcpserver import Image
+from mcp.server.mcpserver.exceptions import ToolError
 from mcp.server.transport_security import TransportSecuritySettings
 from pydantic import AnyHttpUrl, Field
 
@@ -534,6 +538,26 @@ def build_mcp(settings: Settings) -> MCPServer:
         return await preview_many_documents(
             settings, agent_id, documents, max_concurrency=max_concurrency
         )
+
+    @server.tool()
+    async def preview_image(agent_id: str, path: str) -> list[str | Image]:
+        """Render a bounded PNG, JPEG, GIF, or WebP from an Agent allowed root."""
+        result = await GatewayClient(settings).preview_image(agent_id, path)
+        if result.rejected:
+            raise ToolError(result.error or "image preview rejected")
+        if result.format is None or result.mime_type is None or result.sha256 is None:
+            raise ToolError("image preview metadata is incomplete")
+        try:
+            data = base64.b64decode(result.data_base64, validate=True)
+        except (binascii.Error, ValueError) as exc:
+            raise ToolError("image preview payload is invalid base64") from exc
+        if len(data) != result.size:
+            raise ToolError("image preview payload size mismatch")
+        metadata = (
+            f"{result.mime_type} | {result.width}x{result.height} | "
+            f"{result.size} bytes | sha256={result.sha256}"
+        )
+        return [metadata, Image(data=data, format=result.format)]
 
     @server.tool()
     async def read_file(

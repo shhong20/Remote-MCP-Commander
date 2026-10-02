@@ -1,4 +1,5 @@
 import asyncio
+import base64
 
 import pytest
 from mcp import Client
@@ -15,6 +16,7 @@ from remote_mcp_commander.protocol import (
     BatchDocumentPreviewSpec,
     CommandResult,
     DocumentPreviewResult,
+    ImagePreviewResult,
 )
 
 
@@ -54,6 +56,7 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "file_info",
         "preview_document",
         "preview_documents",
+        "preview_image",
         "read_file",
         "read_file_lines",
         "tail_file",
@@ -568,3 +571,60 @@ async def test_preview_many_isolates_gateway_failure(monkeypatch) -> None:
     assert result.results[0].result is None
     assert result.results[1].result is not None
     assert result.results[1].result.content == "ok"
+
+
+@pytest.mark.asyncio
+async def test_preview_image_returns_text_metadata_and_image_content(monkeypatch) -> None:
+    raw = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    )
+
+    async def fake_preview(self, agent_id, path):
+        return ImagePreviewResult(
+            request_id="image",
+            path=path,
+            format="png",
+            mime_type="image/png",
+            data_base64=base64.b64encode(raw).decode("ascii"),
+            size=len(raw),
+            width=1,
+            height=1,
+            sha256="a" * 64,
+        )
+
+    monkeypatch.setattr(GatewayClient, "preview_image", fake_preview)
+    server = build_mcp(make_settings())
+    async with Client(server) as client:
+        result = await client.call_tool(
+            "preview_image",
+            {"agent_id": "server-01", "path": "/home/ubuntu/sample.png"},
+        )
+
+    assert result.is_error is False
+    assert len(result.content) == 2
+    assert result.content[0].type == "text"
+    assert "image/png | 1x1" in result.content[0].text
+    assert result.content[1].type == "image"
+    assert result.content[1].mime_type == "image/png"
+    assert base64.b64decode(result.content[1].data) == raw
+
+
+@pytest.mark.asyncio
+async def test_preview_image_rejection_becomes_tool_error(monkeypatch) -> None:
+    async def fake_preview(self, agent_id, path):
+        return ImagePreviewResult(
+            request_id="image",
+            rejected=True,
+            error="image exceeds 1 MiB preview limit",
+        )
+
+    monkeypatch.setattr(GatewayClient, "preview_image", fake_preview)
+    server = build_mcp(make_settings())
+    async with Client(server) as client:
+        result = await client.call_tool(
+            "preview_image",
+            {"agent_id": "server-01", "path": "/home/ubuntu/large.png"},
+        )
+
+    assert result.is_error is True
+    assert "1 MiB" in result.content[0].text
