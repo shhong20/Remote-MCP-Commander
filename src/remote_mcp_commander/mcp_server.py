@@ -4,9 +4,11 @@ import asyncio
 import base64
 import binascii
 import secrets
+from pathlib import Path
 from typing import Annotated
 from urllib.parse import urlparse
 
+import httpx
 from mcp.server import MCPServer
 from mcp.server.auth.provider import AccessToken, TokenVerifier
 from mcp.server.auth.settings import AuthSettings
@@ -53,6 +55,8 @@ from remote_mcp_commander.protocol import (
     FileTailResult,
     FileWriteResult,
     GitStatusResult,
+    ImagePreviewResult,
+    MultiFileReadSpec,
     PathMutationResult,
     PingResponse,
     PortLookupResult,
@@ -151,6 +155,151 @@ async def preview_many_documents(
         *(run_one(index, document) for index, document in enumerate(documents))
     )
     return BatchDocumentPreviewResult(results=list(results))
+
+
+_DOCUMENT_SUFFIXES = frozenset({".pdf", ".docx", ".xlsx"})
+_IMAGE_SUFFIXES = frozenset({".png", ".jpg", ".jpeg", ".gif", ".webp"})
+_MULTI_READ_MAX_IMAGE_BYTES = 2_097_152
+
+
+def _image_preview_blocks(result: ImagePreviewResult) -> tuple[str, Image]:
+    if result.rejected:
+        raise ToolError(result.error or "image preview rejected")
+    if result.format is None or result.mime_type is None or result.sha256 is None:
+        raise ToolError("image preview metadata is incomplete")
+    try:
+        data = base64.b64decode(result.data_base64, validate=True)
+    except (binascii.Error, ValueError) as exc:
+        raise ToolError("image preview payload is invalid base64") from exc
+    if len(data) != result.size:
+        raise ToolError("image preview payload size mismatch")
+    metadata = (
+        f"{result.mime_type} | {result.width}x{result.height} | "
+        f"{result.size} bytes | sha256={result.sha256}"
+    )
+    return metadata, Image(data=data, format=result.format)
+
+
+async def read_multiple_file_contents(
+    settings: Settings,
+    agent_id: str,
+    files: list[MultiFileReadSpec],
+    *,
+    max_concurrency: int,
+) -> list[str | Image]:
+    semaphore = asyncio.Semaphore(max_concurrency)
+    client = GatewayClient(settings)
+
+    async def read_one(index: int, item: MultiFileReadSpec) -> tuple[int, str, object]:
+        suffix = Path(item.path).suffix.lower()
+        async with semaphore:
+            try:
+                if suffix in _DOCUMENT_SUFFIXES:
+                    result = await client.preview_document(
+                        agent_id,
+                        item.path,
+                        page=item.page,
+                        max_pages=item.max_pages,
+                        sheet=item.sheet,
+                        cell_range=item.cell_range,
+                        max_rows=item.max_rows,
+                        max_chars=item.max_chars,
+                    )
+                    return index, "document", result
+                if suffix in _IMAGE_SUFFIXES:
+                    result = await client.preview_image(agent_id, item.path)
+                    return index, "image", result
+                result = await client.read_file(
+                    agent_id,
+                    item.path,
+                    offset=0,
+                    max_bytes=item.max_bytes,
+                )
+                return index, "text", result
+            except GatewayAPIError as exc:
+                return index, "error", (exc.status_code, exc.detail)
+            except httpx.HTTPError:
+                return index, "error", (503, "gateway request failed")
+            except ValueError:
+                return index, "error", (502, "gateway response validation failed")
+
+    fetched = await asyncio.gather(
+        *(read_one(index, item) for index, item in enumerate(files))
+    )
+
+    content: list[str | Image] = []
+    image_bytes = 0
+    for index, kind, payload in fetched:
+        item = files[index]
+        prefix = f"[{index}] {item.path}"
+        if kind == "error":
+            status_code, detail = payload
+            content.append(f"{prefix} | ERROR {status_code}: {detail}")
+            continue
+        if kind == "text":
+            result = payload
+            if result.rejected:
+                content.append(f"{prefix} | ERROR: {result.error or 'text read rejected'}")
+                continue
+            header = (
+                f"{prefix} | text | {result.size} bytes | eof={result.eof} | "
+                f"sha256={result.sha256 or 'unavailable'}"
+            )
+            content.append(f"{header}\n{result.content}")
+            continue
+        if kind == "document":
+            result = payload
+            if result.rejected:
+                content.append(f"{prefix} | ERROR: {result.error or 'document preview rejected'}")
+                continue
+            details = [f"kind={result.kind}", f"size={result.size}"]
+            if result.kind == "pdf":
+                details.extend(
+                    [
+                        f"page={result.page}",
+                        f"pages_returned={result.pages_returned}",
+                        f"pages_total={result.pages_total}",
+                        f"next_page={result.next_page}",
+                    ]
+                )
+            elif result.kind == "xlsx":
+                details.extend(
+                    [
+                        f"sheet={result.sheet}",
+                        f"cell_range={result.cell_range}",
+                        f"rows_returned={result.rows_returned}",
+                    ]
+                )
+            elif result.kind == "docx":
+                details.extend(
+                    [
+                        f"headings={len(result.headings)}",
+                        f"section_breaks={result.section_breaks}",
+                    ]
+                )
+            details.append(f"sha256={result.sha256 or 'unavailable'}")
+            content.append(f"{prefix} | {' | '.join(details)}\n{result.content}")
+            continue
+
+        result = payload
+        if result.rejected:
+            content.append(f"{prefix} | ERROR: {result.error or 'image preview rejected'}")
+            continue
+        if image_bytes + result.size > _MULTI_READ_MAX_IMAGE_BYTES:
+            content.append(
+                f"{prefix} | ERROR: image omitted because the 2 MiB batch image budget was exceeded"
+            )
+            continue
+        try:
+            metadata, image = _image_preview_blocks(result)
+        except ToolError as exc:
+            content.append(f"{prefix} | ERROR: {exc}")
+            continue
+        image_bytes += result.size
+        content.append(f"{prefix} | {metadata}")
+        content.append(image)
+
+    return content
 
 
 class StaticTokenVerifier(TokenVerifier):
@@ -543,21 +692,22 @@ def build_mcp(settings: Settings) -> MCPServer:
     async def preview_image(agent_id: str, path: str) -> list[str | Image]:
         """Render a bounded PNG, JPEG, GIF, or WebP from an Agent allowed root."""
         result = await GatewayClient(settings).preview_image(agent_id, path)
-        if result.rejected:
-            raise ToolError(result.error or "image preview rejected")
-        if result.format is None or result.mime_type is None or result.sha256 is None:
-            raise ToolError("image preview metadata is incomplete")
-        try:
-            data = base64.b64decode(result.data_base64, validate=True)
-        except (binascii.Error, ValueError) as exc:
-            raise ToolError("image preview payload is invalid base64") from exc
-        if len(data) != result.size:
-            raise ToolError("image preview payload size mismatch")
-        metadata = (
-            f"{result.mime_type} | {result.width}x{result.height} | "
-            f"{result.size} bytes | sha256={result.sha256}"
+        metadata, image = _image_preview_blocks(result)
+        return [metadata, image]
+
+    @server.tool()
+    async def read_multiple_files(
+        agent_id: str,
+        files: Annotated[list[MultiFileReadSpec], Field(min_length=1, max_length=8)],
+        max_concurrency: Annotated[int, Field(ge=1, le=4)] = 4,
+    ) -> list[str | Image]:
+        """Read mixed text, document, and image files with automatic safe routing."""
+        return await read_multiple_file_contents(
+            settings,
+            agent_id,
+            files,
+            max_concurrency=max_concurrency,
         )
-        return [metadata, Image(data=data, format=result.format)]
 
     @server.tool()
     async def read_file(
