@@ -25,7 +25,7 @@ from fastapi import (
 )
 
 from remote_mcp_commander import __version__
-from remote_mcp_commander.config import Settings, get_settings
+from remote_mcp_commander.config import Settings, apply_operator_overrides, get_settings
 from remote_mcp_commander.gateway.approvals import ApprovalError, ApprovalStore
 from remote_mcp_commander.gateway.audit import (
     audit,
@@ -34,6 +34,12 @@ from remote_mcp_commander.gateway.audit import (
     current_journal,
 )
 from remote_mcp_commander.gateway.registry import DeviceRegistry
+from remote_mcp_commander.operator_config import (
+    OPERATOR_MUTABLE_FIELDS,
+    normalize_operator_overrides,
+    read_operator_overrides,
+    write_operator_overrides,
+)
 from remote_mcp_commander.policy import (
     pty_approval_target,
     validate_generic_argv,
@@ -143,6 +149,9 @@ from remote_mcp_commander.protocol import (
     ImagePreviewBody,
     ImagePreviewRequest,
     ImagePreviewResult,
+    OperatorConfigSetBody,
+    OperatorConfigSnapshot,
+    OperatorConfigUpdateResult,
     PathMutationBody,
     PathMutationRequest,
     PathMutationResult,
@@ -563,6 +572,85 @@ async def list_audit_records(
 async def verify_audit_records(settings: SettingsDep) -> AuditVerificationResult:
     journal = configure_audit_for(settings)
     return await asyncio.to_thread(journal.verify)
+
+
+def _operator_config_values(settings: Settings) -> dict[str, int | float]:
+    return {key: getattr(settings, key) for key in sorted(OPERATOR_MUTABLE_FIELDS)}
+
+
+def operator_config_snapshot(settings: Settings) -> OperatorConfigSnapshot:
+    base = Settings(operator_config_path=settings.operator_config_path)
+    overrides = read_operator_overrides(base.operator_config_file)
+    desired = apply_operator_overrides(base, overrides)
+    effective_values = _operator_config_values(settings)
+    desired_values = _operator_config_values(desired)
+    return OperatorConfigSnapshot(
+        operation_mode=settings.operation_mode,
+        config_path=str(base.operator_config_file),
+        mutable_keys=sorted(OPERATOR_MUTABLE_FIELDS),
+        effective=effective_values,
+        overrides=overrides,
+        desired=desired_values,
+        restart_required=effective_values != desired_values,
+    )
+
+
+@app.get(
+    "/api/v1/operator-config",
+    dependencies=[Depends(require_control_token)],
+)
+async def get_operator_config(settings: SettingsDep) -> OperatorConfigSnapshot:
+    try:
+        return await asyncio.to_thread(operator_config_snapshot, settings)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+
+
+@app.post(
+    "/api/v1/operator-config",
+    dependencies=[Depends(require_control_token)],
+)
+async def set_operator_config(
+    body: OperatorConfigSetBody, settings: SettingsDep
+) -> OperatorConfigUpdateResult:
+    if settings.operation_mode != "personal":
+        raise HTTPException(status_code=403, detail="operator config changes require Personal mode")
+
+    base = Settings(operator_config_path=settings.operator_config_path)
+    try:
+        overrides = await asyncio.to_thread(read_operator_overrides, base.operator_config_file)
+        candidate = dict(overrides)
+        if body.value is None:
+            candidate.pop(body.key, None)
+        else:
+            candidate[body.key] = body.value
+        candidate = normalize_operator_overrides(candidate)
+        apply_operator_overrides(base, candidate)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    audit_required(
+        "operator_config_update_requested",
+        key=body.key,
+        reset=body.value is None,
+    )
+    try:
+        await asyncio.to_thread(write_operator_overrides, base.operator_config_file, candidate)
+        snapshot = await asyncio.to_thread(operator_config_snapshot, settings)
+    except (OSError, ValueError) as exc:
+        raise HTTPException(status_code=500, detail=str(exc)) from exc
+    audit(
+        "operator_config_updated",
+        key=body.key,
+        reset=body.value is None,
+        restart_required=snapshot.restart_required,
+    )
+    return OperatorConfigUpdateResult(
+        key=body.key,
+        value=body.value,
+        removed=body.value is None,
+        snapshot=snapshot,
+    )
 
 
 @app.post(

@@ -3,7 +3,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, Field, StrictFloat, StrictInt, model_validator
 
 PROTOCOL_MIN_SUPPORTED = 1
 PROTOCOL_MAX_SUPPORTED = 1
@@ -1399,6 +1399,47 @@ class RuntimeConfigResult(BaseModel):
     generic_unavailable: list[str] = Field(default_factory=list)
     pty_available: list[str] = Field(default_factory=list)
     pty_unavailable: list[str] = Field(default_factory=list)
+
+
+OperatorConfigKey = Literal[
+    "max_output_bytes",
+    "exec_timeout_s",
+    "session_timeout_s",
+    "session_input_max_bytes",
+    "session_max_active",
+    "session_history_limit",
+    "pty_timeout_s",
+    "pty_max_active",
+    "pty_input_max_bytes",
+    "file_max_bytes",
+    "transfer_max_bytes",
+    "transfer_session_ttl_s",
+    "transfer_max_active",
+    "transfer_request_timeout_s",
+]
+OperatorConfigValue = StrictInt | StrictFloat
+
+
+class OperatorConfigSnapshot(BaseModel):
+    operation_mode: Literal["hardened", "personal"]
+    config_path: str
+    mutable_keys: list[OperatorConfigKey]
+    effective: dict[OperatorConfigKey, OperatorConfigValue]
+    overrides: dict[OperatorConfigKey, OperatorConfigValue]
+    desired: dict[OperatorConfigKey, OperatorConfigValue]
+    restart_required: bool = False
+
+
+class OperatorConfigSetBody(BaseModel):
+    key: OperatorConfigKey
+    value: OperatorConfigValue | None = None
+
+
+class OperatorConfigUpdateResult(BaseModel):
+    key: OperatorConfigKey
+    value: OperatorConfigValue | None = None
+    removed: bool = False
+    snapshot: OperatorConfigSnapshot
 
 
 class AuditVerificationResult(BaseModel):

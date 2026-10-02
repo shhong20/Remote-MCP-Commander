@@ -1377,3 +1377,63 @@ async def test_file_transfer_download_status_and_close_client_routes() -> None:
     assert b'"offset":10' in seen[1].content
     assert seen[2].method == "GET"
     assert seen[3].url.path.endswith(f"/{session_id}/close")
+
+
+@pytest.mark.asyncio
+async def test_operator_config_client_uses_secret_free_config_route() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "operation_mode": "personal",
+                "config_path": "/home/ubuntu/.remote-mcp-commander/operator-config.json",
+                "mutable_keys": ["max_output_bytes"],
+                "effective": {"max_output_bytes": 65536},
+                "overrides": {},
+                "desired": {"max_output_bytes": 65536},
+                "restart_required": False,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    result = await client.get_operator_config()
+
+    assert result.restart_required is False
+    assert seen[0].method == "GET"
+    assert seen[0].url.path == "/api/v1/operator-config"
+
+
+@pytest.mark.asyncio
+async def test_operator_config_client_posts_one_allowlisted_value() -> None:
+    seen: list[httpx.Request] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        seen.append(request)
+        return httpx.Response(
+            200,
+            json={
+                "key": "max_output_bytes",
+                "value": 131072,
+                "removed": False,
+                "snapshot": {
+                    "operation_mode": "personal",
+                    "config_path": "/home/ubuntu/.remote-mcp-commander/operator-config.json",
+                    "mutable_keys": ["max_output_bytes"],
+                    "effective": {"max_output_bytes": 65536},
+                    "overrides": {"max_output_bytes": 131072},
+                    "desired": {"max_output_bytes": 131072},
+                    "restart_required": True,
+                },
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    result = await client.set_operator_config("max_output_bytes", 131_072)
+
+    assert result.snapshot.restart_required is True
+    assert seen[0].method == "POST"
+    assert seen[0].url.path == "/api/v1/operator-config"
+    assert seen[0].content == b'{"key":"max_output_bytes","value":131072}'

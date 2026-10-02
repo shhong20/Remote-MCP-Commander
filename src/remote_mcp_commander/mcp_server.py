@@ -64,6 +64,9 @@ from remote_mcp_commander.protocol import (
     GitStatusResult,
     ImagePreviewResult,
     MultiFileReadSpec,
+    OperatorConfigKey,
+    OperatorConfigSnapshot,
+    OperatorConfigUpdateResult,
     PathMutationResult,
     PingResponse,
     PortLookupResult,
@@ -466,6 +469,19 @@ def build_mcp(settings: Settings) -> MCPServer:
             pty_available=commands.pty_available,
             pty_unavailable=commands.pty_unavailable,
         )
+
+    @server.tool()
+    async def get_operator_config() -> OperatorConfigSnapshot:
+        """Read secret-free mutable operator limits and pending restart state."""
+        return await GatewayClient(settings).get_operator_config()
+
+    @server.tool()
+    async def set_operator_config(
+        key: OperatorConfigKey,
+        value: int | float | None = None,
+    ) -> OperatorConfigUpdateResult:
+        """Persist one allowlisted Personal-mode operator limit; restart is explicit."""
+        return await GatewayClient(settings).set_operator_config(key, value)
 
     @server.tool()
     async def get_recent_activity(

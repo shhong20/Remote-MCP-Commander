@@ -39,6 +39,8 @@ from remote_mcp_commander.protocol import (
     FileWriteResult,
     GitStatusResult,
     ImagePreviewResult,
+    OperatorConfigSnapshot,
+    OperatorConfigUpdateResult,
     PathMutationResult,
     PingResponse,
     PortLookupResult,
@@ -131,6 +133,20 @@ class GatewayClient:
             params["agent_id"] = agent_id
         payload = await self._request("GET", "/api/v1/audit", params=params)
         return AuditQueryResult.model_validate(payload)
+
+    async def get_operator_config(self) -> OperatorConfigSnapshot:
+        payload = await self._request("GET", "/api/v1/operator-config")
+        return OperatorConfigSnapshot.model_validate(payload)
+
+    async def set_operator_config(
+        self, key: str, value: int | float | None
+    ) -> OperatorConfigUpdateResult:
+        payload = await self._request(
+            "POST",
+            "/api/v1/operator-config",
+            json_body={"key": key, "value": value},
+        )
+        return OperatorConfigUpdateResult.model_validate(payload)
 
     async def device_info(self, agent_id: str) -> AgentInfo:
         payload = await self._request("GET", f"/api/v1/agents/{agent_id}")
