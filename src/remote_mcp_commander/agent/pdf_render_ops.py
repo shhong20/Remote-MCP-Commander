@@ -270,6 +270,61 @@ def _build_fodt(markdown: str) -> str:
     )
 
 
+def _render_markdown_to_temp_pdf(
+    markdown: str,
+    temp_dir: Path,
+    *,
+    deadline: float,
+    stem: str = "document",
+) -> tuple[Path, int]:
+    _require_tool(SOFFICE_PATH, "LibreOffice Writer")
+    if len(markdown.encode("utf-8")) > PDF_RENDER_MAX_MARKDOWN_BYTES:
+        raise ValueError("Markdown input exceeds UTF-8 byte limit")
+    if not markdown.strip():
+        raise ValueError("Markdown content is empty")
+    fodt_path = temp_dir / f"{stem}.fodt"
+    fodt_path.write_text(_build_fodt(markdown), encoding="utf-8")
+    if os.name != "nt":
+        os.chmod(fodt_path, 0o600)
+    profile_dir = temp_dir / f"profile-{stem}"
+    profile_dir.mkdir(mode=0o700)
+    process = subprocess.run(
+        [
+            str(SOFFICE_PATH),
+            "--safe-mode",
+            "--headless",
+            "--nologo",
+            "--nodefault",
+            "--nofirststartwizard",
+            "--nolockcheck",
+            f"-env:UserInstallation={profile_dir.as_uri()}",
+            "--convert-to",
+            "pdf:writer_pdf_Export",
+            "--outdir",
+            str(temp_dir),
+            str(fodt_path),
+        ],
+        stdin=subprocess.DEVNULL,
+        capture_output=True,
+        timeout=_remaining_timeout(deadline, 75.0),
+        check=False,
+    )
+    if process.returncode != 0:
+        raise ValueError(_bounded_error(process, "PDF rendering failed"))
+    temp_output = temp_dir / f"{stem}.pdf"
+    if not temp_output.is_file():
+        raise ValueError("PDF rendering did not produce an output file")
+    if temp_output.stat().st_size > DOCUMENT_MAX_INPUT_BYTES:
+        raise ValueError("rendered PDF exceeds size limit")
+    pages = _pdf_page_count(
+        temp_output, timeout_s=_remaining_timeout(deadline, 15.0)
+    )
+    if pages > PDF_RENDER_MAX_PAGES:
+        raise ValueError(f"rendered PDF exceeds {PDF_RENDER_MAX_PAGES} page limit")
+    _reject_unsafe_pdf_features(temp_output, deadline=deadline)
+    return temp_output, pages
+
+
 def _render_pdf_sync(
     request_id: str,
     output_path: str,
@@ -282,11 +337,6 @@ def _render_pdf_sync(
     temp_dir: Path | None = None
     deadline = time.monotonic() + PDF_RENDER_TIMEOUT_S
     try:
-        _require_tool(SOFFICE_PATH, "LibreOffice Writer")
-        if len(markdown.encode("utf-8")) > PDF_RENDER_MAX_MARKDOWN_BYTES:
-            raise ValueError("Markdown input exceeds UTF-8 byte limit")
-        if not markdown.strip():
-            raise ValueError("Markdown content is empty")
         output, existed, mode, output_identity = _resolve_output(
             output_path,
             roots,
@@ -296,46 +346,9 @@ def _render_pdf_sync(
         temp_dir = Path(tempfile.mkdtemp(prefix=".remote-mcp-render-", dir=output.parent))
         if os.name != "nt":
             os.chmod(temp_dir, 0o700)
-        fodt_path = temp_dir / "document.fodt"
-        fodt_path.write_text(_build_fodt(markdown), encoding="utf-8")
-        if os.name != "nt":
-            os.chmod(fodt_path, 0o600)
-        profile_dir = temp_dir / "profile"
-        profile_dir.mkdir(mode=0o700)
-        process = subprocess.run(
-            [
-                str(SOFFICE_PATH),
-                "--safe-mode",
-                "--headless",
-                "--nologo",
-                "--nodefault",
-                "--nofirststartwizard",
-                "--nolockcheck",
-                f"-env:UserInstallation={profile_dir.as_uri()}",
-                "--convert-to",
-                "pdf:writer_pdf_Export",
-                "--outdir",
-                str(temp_dir),
-                str(fodt_path),
-            ],
-            stdin=subprocess.DEVNULL,
-            capture_output=True,
-            timeout=_remaining_timeout(deadline, 75.0),
-            check=False,
+        temp_output, pages = _render_markdown_to_temp_pdf(
+            markdown, temp_dir, deadline=deadline
         )
-        if process.returncode != 0:
-            raise ValueError(_bounded_error(process, "PDF rendering failed"))
-        temp_output = temp_dir / "document.pdf"
-        if not temp_output.is_file():
-            raise ValueError("PDF rendering did not produce an output file")
-        if temp_output.stat().st_size > DOCUMENT_MAX_INPUT_BYTES:
-            raise ValueError("rendered PDF exceeds size limit")
-        pages = _pdf_page_count(
-            temp_output, timeout_s=_remaining_timeout(deadline, 15.0)
-        )
-        if pages > PDF_RENDER_MAX_PAGES:
-            raise ValueError(f"rendered PDF exceeds {PDF_RENDER_MAX_PAGES} page limit")
-        _reject_unsafe_pdf_features(temp_output, deadline=deadline)
         if os.name != "nt":
             os.chmod(temp_output, mode)
         with temp_output.open("rb") as handle:

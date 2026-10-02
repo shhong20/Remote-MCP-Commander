@@ -45,6 +45,7 @@ def test_capabilities_reflect_available_tools_and_allowed_roots(
         lambda name, search_path=None: f"/usr/bin/{name}" if name == "uptime" else None,
     )
     monkeypatch.setattr(capabilities, "_pdf_render_available", lambda: True)
+    monkeypatch.setattr(capabilities, "_pdf_rewrite_available", lambda: True)
 
     result = capabilities.detect_capabilities(make_settings(), [root])
 
@@ -70,6 +71,7 @@ def test_capabilities_reflect_available_tools_and_allowed_roots(
         "document.edit",
         "pdf.compose",
         "pdf.render",
+        "pdf.rewrite",
         "image.preview",
         "file.write",
         "file.append",
@@ -187,6 +189,7 @@ def test_personal_mode_can_disable_session_signal_with_approval_requirement(tmp_
 
 def test_pdf_render_capability_requires_renderer(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(capabilities, "_pdf_render_available", lambda: False)
+    monkeypatch.setattr(capabilities, "_pdf_rewrite_available", lambda: False)
     monkeypatch.setattr(capabilities.shutil, "which", lambda *args, **kwargs: None)
     monkeypatch.setattr(capabilities, "resolve_generic_executable", lambda *args, **kwargs: None)
 
@@ -194,3 +197,16 @@ def test_pdf_render_capability_requires_renderer(monkeypatch, tmp_path: Path) ->
 
     assert "pdf.compose" in result
     assert "pdf.render" not in result
+    assert "pdf.rewrite" not in result
+
+
+def test_pdf_rewrite_capability_requires_all_fixed_tools(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(capabilities, "_pdf_render_available", lambda: True)
+    monkeypatch.setattr(capabilities, "_pdf_rewrite_available", lambda: False)
+    monkeypatch.setattr(capabilities.shutil, "which", lambda *args, **kwargs: None)
+    monkeypatch.setattr(capabilities, "resolve_generic_executable", lambda *args, **kwargs: None)
+
+    result = capabilities.detect_capabilities(make_settings(), [tmp_path.resolve()])
+
+    assert "pdf.render" in result
+    assert "pdf.rewrite" not in result

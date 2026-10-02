@@ -25,10 +25,21 @@ BASE_CAPABILITIES = {
     "process.signal",
 }
 PDF_RENDER_PATH = Path("/usr/bin/soffice")
+PDF_REWRITE_PATHS = (
+    PDF_RENDER_PATH,
+    Path("/usr/bin/pdfinfo"),
+    Path("/usr/bin/pdfdetach"),
+    Path("/usr/bin/pdfseparate"),
+    Path("/usr/bin/pdfunite"),
+)
 
 
 def _pdf_render_available() -> bool:
     return PDF_RENDER_PATH.is_file() and os.access(PDF_RENDER_PATH, os.X_OK)
+
+
+def _pdf_rewrite_available() -> bool:
+    return all(path.is_file() and os.access(path, os.X_OK) for path in PDF_REWRITE_PATHS)
 
 
 def detect_capabilities(settings: Settings, roots: list[Path]) -> list[str]:
@@ -70,6 +81,8 @@ def detect_capabilities(settings: Settings, roots: list[Path]) -> list[str]:
         )
         if _pdf_render_available():
             capabilities.add("pdf.render")
+        if _pdf_rewrite_available():
+            capabilities.add("pdf.rewrite")
         if settings.operation_mode == "personal":
             capabilities.update({"filesystem.mutate", "filesystem.tree_mutate"})
         if shutil.which("git", path=TRUSTED_GIT_PATH) is not None:

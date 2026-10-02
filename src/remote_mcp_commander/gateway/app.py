@@ -164,6 +164,9 @@ from remote_mcp_commander.protocol import (
     PdfRenderBody,
     PdfRenderRequest,
     PdfRenderResult,
+    PdfRewriteBody,
+    PdfRewriteRequest,
+    PdfRewriteResult,
     PingRequest,
     PingResponse,
     PingResult,
@@ -262,6 +265,7 @@ AgentReply = (
     | DocumentEditResult
     | PdfComposeResult
     | PdfRenderResult
+    | PdfRewriteResult
     | ImagePreviewResult
     | FileLineReadResult
     | FileTailResult
@@ -2141,6 +2145,53 @@ async def render_agent_pdf(
 
 
 @app.post(
+    "/api/v1/agents/{agent_id}/pdf/rewrite",
+    dependencies=[Depends(require_control_token)],
+)
+async def rewrite_agent_pdf(
+    agent_id: str, body: PdfRewriteBody, settings: SettingsDep
+) -> PdfRewriteResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "pdf.rewrite")
+    audit_required(
+        "pdf_rewrite_requested",
+        agent_id=agent_id,
+        output_path=body.output_path,
+        segment_count=len(body.segments),
+        markdown_segment_count=sum(
+            1 for segment in body.segments if segment.kind == "markdown"
+        ),
+        overwrite=body.overwrite,
+    )
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = PdfRewriteRequest(request_id=request_id, **body.model_dump())
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=max(settings.request_timeout_s, 135.0))
+        if not isinstance(reply, PdfRewriteResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "pdf_rewrite",
+            agent_id=agent_id,
+            output_path=body.output_path,
+            segment_count=len(body.segments),
+            pages_written=reply.pages_written,
+            bytes_written=reply.bytes_written,
+            rejected=reply.rejected,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent PDF rewrite timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
     "/api/v1/agents/{agent_id}/images/preview",
     dependencies=[Depends(require_control_token)],
 )
@@ -3620,6 +3671,8 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
                 reply = PdfComposeResult.model_validate(payload)
             elif message_type == "pdf_render_result":
                 reply = PdfRenderResult.model_validate(payload)
+            elif message_type == "pdf_rewrite_result":
+                reply = PdfRewriteResult.model_validate(payload)
             elif message_type == "image_preview_result":
                 reply = ImagePreviewResult.model_validate(payload)
             elif message_type == "file_line_read_result":
