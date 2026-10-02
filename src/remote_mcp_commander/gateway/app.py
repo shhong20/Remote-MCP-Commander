@@ -358,7 +358,11 @@ def validate_approval_target(operation: str, target: str) -> None:
 
 
 def enforce_agent_policy(agent_id: str, argv: list[str], settings: Settings) -> None:
-    generic_error = validate_generic_argv(argv, mode=settings.operation_mode)
+    generic_error = validate_generic_argv(
+        argv,
+        mode=settings.operation_mode,
+        personal_allowlist=settings.executable_allowlist,
+    )
     if generic_error is not None:
         audit("command_denied", agent_id=agent_id, executable=Path(argv[0]).name)
         raise HTTPException(status_code=403, detail=generic_error)

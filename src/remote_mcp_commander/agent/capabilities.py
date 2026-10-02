@@ -63,9 +63,9 @@ def detect_capabilities(settings: Settings, roots: list[Path]) -> list[str]:
     if settings.personal_mode:
         capabilities.add("command.env")
 
-    configured = settings.executable_allowlist.intersection(
-        generic_executables_for_mode(settings.operation_mode)
-    )
+    configured = settings.executable_allowlist
+    if not settings.personal_mode:
+        configured = configured.intersection(generic_executables_for_mode(settings.operation_mode))
     if any(
         resolve_generic_executable(name, search_path=settings.command_search_path) is not None
         for name in configured
@@ -103,11 +103,12 @@ def detect_capabilities(settings: Settings, roots: list[Path]) -> list[str]:
 
 
 def discover_commands(settings: Settings, request_id: str) -> CommandDiscoveryResult:
-    generic_profiles = sorted(
-        settings.executable_allowlist.intersection(
+    generic_profiles = settings.executable_allowlist
+    if not settings.personal_mode:
+        generic_profiles = generic_profiles.intersection(
             generic_executables_for_mode(settings.operation_mode)
         )
-    )
+    generic_profiles = sorted(generic_profiles)
     generic_available: list[str] = []
     generic_unavailable: list[str] = []
     for name in generic_profiles:

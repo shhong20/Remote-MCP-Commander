@@ -135,7 +135,9 @@ class CommandSessionManager:
         env_overrides: dict[str, str] | None = None,
         timeout_s: float | None = None,
     ) -> CommandSessionSnapshot:
-        policy_error = validate_generic_argv(argv, mode=self.policy_mode)
+        policy_error = validate_generic_argv(
+            argv, mode=self.policy_mode, personal_allowlist=self.allowlist
+        )
         if policy_error is not None:
             return self._error_snapshot(request_id, session_id, policy_error)
         executable = Path(argv[0]).name
