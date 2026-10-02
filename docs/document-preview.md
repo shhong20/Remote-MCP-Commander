@@ -23,3 +23,9 @@ The tool never executes macros, follows external document links, or writes docum
 PDF extraction accepts at most 20 pages per call and the returned text is bounded by `max_chars`. XLSX output is limited by `max_rows`, `max_chars`, and 256 columns; A1 ranges must remain within that 256-column preview boundary and the worksheet row limit. Unsupported file types and invalid/reversed ranges fail closed.
 
 This preview is intentionally text-oriented. Images, embedded objects, styling other than heading levels, formulas beyond cached cell values, and document editing remain outside this interface.
+
+## Batch preview
+
+`preview_documents` reuses the same Gateway and Agent `preview_document` path for every item, so allowed-root checks, format validation, document bounds, and audit records are not bypassed. The batch accepts at most 8 documents and runs at most 4 previews concurrently. Each item defaults to 32,768 output characters and cannot request more than 65,536 characters, bounding preview text across one batch to roughly 512 KiB before metadata.
+
+Items are returned in input order. A Gateway rejection for one document is represented on that item with `status_code` and `error`; it does not cancel successful previews for the other documents. Format-level failures such as an unsupported document or an out-of-range PDF page remain normal `DocumentPreviewResult(rejected=true)` values from the existing single-document path.

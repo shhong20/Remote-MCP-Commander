@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "remote-mcp-commander"
-version = "0.60.0"
+version = "0.61.0"
 description = "Self-hosted outbound-agent remote command bridge for MCP/AI clients"
 readme = "README.md"
 requires-python = ">=3.11"

@@ -21,6 +21,9 @@ from remote_mcp_commander.protocol import (
     BatchCommandItemResult,
     BatchCommandResult,
     BatchCommandSpec,
+    BatchDocumentPreviewItemResult,
+    BatchDocumentPreviewResult,
+    BatchDocumentPreviewSpec,
     CommandDiscoveryResult,
     CommandResult,
     CommandSessionDiscardResult,
@@ -102,6 +105,48 @@ async def execute_many_commands(
         *(run_one(index, command) for index, command in enumerate(commands))
     )
     return BatchCommandResult(results=list(results))
+
+
+async def preview_many_documents(
+    settings: Settings,
+    agent_id: str,
+    documents: list[BatchDocumentPreviewSpec],
+    *,
+    max_concurrency: int,
+) -> BatchDocumentPreviewResult:
+    semaphore = asyncio.Semaphore(max_concurrency)
+    client = GatewayClient(settings)
+
+    async def run_one(
+        index: int, document: BatchDocumentPreviewSpec
+    ) -> BatchDocumentPreviewItemResult:
+        async with semaphore:
+            try:
+                result = await client.preview_document(
+                    agent_id,
+                    document.path,
+                    page=document.page,
+                    max_pages=document.max_pages,
+                    sheet=document.sheet,
+                    cell_range=document.cell_range,
+                    max_rows=document.max_rows,
+                    max_chars=document.max_chars,
+                )
+                return BatchDocumentPreviewItemResult(
+                    index=index, path=document.path, result=result
+                )
+            except GatewayAPIError as exc:
+                return BatchDocumentPreviewItemResult(
+                    index=index,
+                    path=document.path,
+                    status_code=exc.status_code,
+                    error=exc.detail,
+                )
+
+    results = await asyncio.gather(
+        *(run_one(index, document) for index, document in enumerate(documents))
+    )
+    return BatchDocumentPreviewResult(results=list(results))
 
 
 class StaticTokenVerifier(TokenVerifier):
@@ -475,6 +520,19 @@ def build_mcp(settings: Settings) -> MCPServer:
             cell_range=cell_range,
             max_rows=max_rows,
             max_chars=max_chars,
+        )
+
+    @server.tool()
+    async def preview_documents(
+        agent_id: str,
+        documents: Annotated[
+            list[BatchDocumentPreviewSpec], Field(min_length=1, max_length=8)
+        ],
+        max_concurrency: Annotated[int, Field(ge=1, le=4)] = 4,
+    ) -> BatchDocumentPreviewResult:
+        """Preview up to 8 independent documents with bounded concurrency."""
+        return await preview_many_documents(
+            settings, agent_id, documents, max_concurrency=max_concurrency
         )
 
     @server.tool()
