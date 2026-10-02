@@ -42,3 +42,11 @@ Set `COMMANDER_PERSONAL_PTY_APPROVAL_REQUIRED=true` on the Gateway to restore th
 `signal_process` supports `term`, `kill`, `int`, and `hup` while binding every action to the inspected `(pid, create_time_ms)` identity so PID reuse cannot redirect a stale request. Personal mode does not require an external approval by default because the same Agent user can already signal its own processes through the broad shell path. Hardened mode always requires a one-use approval whose operation is bound to the exact signal type.
 
 Set `COMMANDER_PERSONAL_PROCESS_APPROVAL_REQUIRED=true` on the Gateway to restore one-use approval for structured process signals in Personal mode. The existing `terminate_process` tool remains approval-required in all modes for backward compatibility.
+
+## Expanded Personal command profiles
+
+The Personal generic profile also includes common development and operations utilities such as `jq`, `rsync`, `ssh`, `scp`, `ffmpeg`, `ffprobe`, `sqlite3`, `psql`, `tmux`, `screen`, checksum tools, compression tools, and diff/patch utilities when those executable names resolve in the Agent user's PATH.
+
+Some broad privilege, raw-process, and low-level storage commands remain intentionally outside the generic profile. Managed process and session signaling should use the structured `signal_process` and `signal_session` paths so PID identity checks and audit safeguards remain in effect.
+
+This profile boundary is a structured-API preference, not an OS sandbox guarantee. Personal mode already permits user-level command composition through the explicitly supported shell profiles, and every child process remains limited to the permissions of the OS account running the Agent.
