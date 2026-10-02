@@ -832,6 +832,48 @@ class PathMutationBody(BaseModel):
     overwrite: bool = False
 
 
+PathMutationOperation = Literal["mkdir", "copy", "move", "delete"]
+
+
+class BatchPathMutationSpec(BaseModel):
+    operation: PathMutationOperation
+    path: str = Field(min_length=1, max_length=4096)
+    destination: str | None = Field(default=None, min_length=1, max_length=4096)
+    parents: bool = False
+    overwrite: bool = False
+
+    @model_validator(mode="after")
+    def validate_operation_fields(self) -> BatchPathMutationSpec:
+        if self.operation in {"copy", "move"}:
+            if self.destination is None:
+                raise ValueError("destination is required for copy/move")
+            if self.parents:
+                raise ValueError("parents is only valid for mkdir")
+            return self
+        if self.destination is not None:
+            raise ValueError("destination is only valid for copy/move")
+        if self.overwrite:
+            raise ValueError("overwrite is only valid for copy/move")
+        if self.operation == "delete" and self.parents:
+            raise ValueError("parents is only valid for mkdir")
+        return self
+
+
+class BatchPathMutationItemResult(BaseModel):
+    index: int = Field(ge=0)
+    operation: PathMutationOperation
+    path: str
+    result: PathMutationResult | None = None
+    status_code: int | None = None
+    error: str | None = None
+
+
+class BatchPathMutationResult(BaseModel):
+    results: list[BatchPathMutationItemResult] = Field(default_factory=list)
+    completed_count: int = Field(default=0, ge=0, le=16)
+    stopped_early: bool = False
+
+
 class TreeInspectRequest(BaseModel):
     type: Literal["tree_inspect_request"] = "tree_inspect_request"
     request_id: str

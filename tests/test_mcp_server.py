@@ -10,17 +10,20 @@ from remote_mcp_commander.gateway.client import GatewayAPIError, GatewayClient
 from remote_mcp_commander.mcp_server import (
     build_mcp,
     execute_many_commands,
+    mutate_many_paths,
     preview_many_documents,
     read_multiple_file_contents,
 )
 from remote_mcp_commander.protocol import (
     BatchCommandSpec,
     BatchDocumentPreviewSpec,
+    BatchPathMutationSpec,
     CommandResult,
     DocumentPreviewResult,
     FileReadResult,
     ImagePreviewResult,
     MultiFileReadSpec,
+    PathMutationResult,
 )
 
 
@@ -79,6 +82,7 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "inspect_tree",
         "copy_directory",
         "delete_tree",
+        "mutate_paths",
         "create_directory",
         "copy_file",
         "move_path",
@@ -179,6 +183,18 @@ async def test_execute_schema_requires_structured_argv() -> None:
     assert binary_write_schema["properties"]["data_base64"]["maxLength"] == 1_398_104
     assert binary_write_schema["properties"]["overwrite"]["default"] is False
     assert binary_write_schema["properties"]["expected_sha256"]["default"] is None
+
+    mutation_batch_schema = next(
+        tool for tool in result.tools if tool.name == "mutate_paths"
+    ).input_schema
+    assert set(mutation_batch_schema["required"]) == {"agent_id", "operations"}
+    assert mutation_batch_schema["properties"]["operations"]["minItems"] == 1
+    assert mutation_batch_schema["properties"]["operations"]["maxItems"] == 16
+    assert mutation_batch_schema["properties"]["stop_on_error"]["default"] is True
+    mutation_spec = mutation_batch_schema["$defs"]["BatchPathMutationSpec"]
+    assert set(mutation_spec["required"]) == {"operation", "path"}
+    assert mutation_spec["properties"]["parents"]["default"] is False
+    assert mutation_spec["properties"]["overwrite"]["default"] is False
 
     batch_schema = next(
         tool for tool in result.tools if tool.name == "execute_many"
@@ -861,3 +877,179 @@ async def test_read_multiple_files_isolates_gateway_transport_and_validation_fai
     assert len(result) == 2
     assert "ERROR 503: gateway request failed" in result[0]
     assert "ERROR 502: gateway response validation failed" in result[1]
+
+
+@pytest.mark.asyncio
+async def test_mutate_many_paths_runs_sequentially_in_input_order(monkeypatch) -> None:
+    active = 0
+    max_active = 0
+    seen: list[tuple[str, str, str | None, bool, bool]] = []
+
+    async def fake_mutate(
+        self, agent_id, operation, path, *, destination=None, parents=False, overwrite=False
+    ):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        seen.append((operation, path, destination, parents, overwrite))
+        await asyncio.sleep(0.01)
+        active -= 1
+        return PathMutationResult(
+            request_id=path,
+            operation=operation,
+            path=path,
+            destination=destination,
+            changed=True,
+        )
+
+    monkeypatch.setattr(GatewayClient, "mutate_path", fake_mutate)
+    operations = [
+        BatchPathMutationSpec(operation="mkdir", path="/home/ubuntu/work", parents=True),
+        BatchPathMutationSpec(
+            operation="copy",
+            path="/home/ubuntu/a.bin",
+            destination="/home/ubuntu/work/a.bin",
+        ),
+        BatchPathMutationSpec(
+            operation="move",
+            path="/home/ubuntu/work/a.bin",
+            destination="/home/ubuntu/work/b.bin",
+            overwrite=True,
+        ),
+        BatchPathMutationSpec(operation="delete", path="/home/ubuntu/work/b.bin"),
+    ]
+
+    result = await mutate_many_paths(
+        make_settings(), "server-01", operations, stop_on_error=True
+    )
+
+    assert result.completed_count == 4
+    assert result.stopped_early is False
+    assert [item.index for item in result.results] == [0, 1, 2, 3]
+    assert [item.operation for item in result.results] == ["mkdir", "copy", "move", "delete"]
+    assert seen == [
+        ("mkdir", "/home/ubuntu/work", None, True, False),
+        ("copy", "/home/ubuntu/a.bin", "/home/ubuntu/work/a.bin", False, False),
+        ("move", "/home/ubuntu/work/a.bin", "/home/ubuntu/work/b.bin", False, True),
+        ("delete", "/home/ubuntu/work/b.bin", None, False, False),
+    ]
+    assert max_active == 1
+
+
+@pytest.mark.asyncio
+async def test_mutate_many_paths_stops_after_rejected_result_by_default(monkeypatch) -> None:
+    calls: list[str] = []
+
+    async def fake_mutate(self, agent_id, operation, path, **kwargs):
+        calls.append(path)
+        if path.endswith("missing.bin"):
+            return PathMutationResult(
+                request_id="reject",
+                operation=operation,
+                path=path,
+                rejected=True,
+                error="source path does not exist",
+            )
+        return PathMutationResult(
+            request_id="ok", operation=operation, path=path, changed=True
+        )
+
+    monkeypatch.setattr(GatewayClient, "mutate_path", fake_mutate)
+    result = await mutate_many_paths(
+        make_settings(),
+        "server-01",
+        [
+            BatchPathMutationSpec(operation="delete", path="/home/ubuntu/first.bin"),
+            BatchPathMutationSpec(operation="delete", path="/home/ubuntu/missing.bin"),
+            BatchPathMutationSpec(operation="delete", path="/home/ubuntu/last.bin"),
+        ],
+        stop_on_error=True,
+    )
+
+    assert calls == ["/home/ubuntu/first.bin", "/home/ubuntu/missing.bin"]
+    assert result.completed_count == 2
+    assert result.stopped_early is True
+    assert result.results[1].result is not None
+    assert result.results[1].result.rejected is True
+
+
+@pytest.mark.asyncio
+async def test_mutate_many_paths_can_continue_after_item_failure(monkeypatch) -> None:
+    calls: list[str] = []
+
+    async def fake_mutate(self, agent_id, operation, path, **kwargs):
+        calls.append(path)
+        if path.endswith("blocked.bin"):
+            raise GatewayAPIError(403, "mutation denied")
+        return PathMutationResult(
+            request_id="ok", operation=operation, path=path, changed=True
+        )
+
+    monkeypatch.setattr(GatewayClient, "mutate_path", fake_mutate)
+    result = await mutate_many_paths(
+        make_settings(),
+        "server-01",
+        [
+            BatchPathMutationSpec(operation="delete", path="/home/ubuntu/blocked.bin"),
+            BatchPathMutationSpec(operation="delete", path="/home/ubuntu/next.bin"),
+        ],
+        stop_on_error=False,
+    )
+
+    assert calls == ["/home/ubuntu/blocked.bin", "/home/ubuntu/next.bin"]
+    assert result.completed_count == 2
+    assert result.stopped_early is False
+    assert result.results[0].status_code == 403
+    assert result.results[0].error == "mutation denied"
+    assert result.results[1].result is not None
+    assert result.results[1].result.changed is True
+
+
+def test_batch_path_mutation_spec_rejects_irrelevant_fields() -> None:
+    with pytest.raises(ValueError, match="destination is required"):
+        BatchPathMutationSpec(operation="copy", path="/home/ubuntu/a.bin")
+    with pytest.raises(ValueError, match="parents is only valid"):
+        BatchPathMutationSpec(
+            operation="move",
+            path="/home/ubuntu/a.bin",
+            destination="/home/ubuntu/b.bin",
+            parents=True,
+        )
+    with pytest.raises(ValueError, match="destination is only valid"):
+        BatchPathMutationSpec(
+            operation="delete",
+            path="/home/ubuntu/a.bin",
+            destination="/home/ubuntu/b.bin",
+        )
+    with pytest.raises(ValueError, match="overwrite is only valid"):
+        BatchPathMutationSpec(operation="mkdir", path="/home/ubuntu/new", overwrite=True)
+
+
+@pytest.mark.asyncio
+async def test_mutate_many_paths_isolates_transport_error(monkeypatch) -> None:
+    calls = 0
+
+    async def fake_mutate(self, agent_id, operation, path, **kwargs):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise httpx.ConnectError("connection failed")
+        return PathMutationResult(
+            request_id="ok", operation=operation, path=path, changed=True
+        )
+
+    monkeypatch.setattr(GatewayClient, "mutate_path", fake_mutate)
+    result = await mutate_many_paths(
+        make_settings(),
+        "server-01",
+        [
+            BatchPathMutationSpec(operation="delete", path="/home/ubuntu/first.bin"),
+            BatchPathMutationSpec(operation="delete", path="/home/ubuntu/second.bin"),
+        ],
+        stop_on_error=False,
+    )
+
+    assert result.results[0].status_code == 503
+    assert result.results[0].error == "gateway request failed"
+    assert result.results[1].result is not None
+    assert result.results[1].result.changed is True

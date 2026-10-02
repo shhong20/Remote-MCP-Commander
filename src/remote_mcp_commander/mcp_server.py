@@ -30,6 +30,9 @@ from remote_mcp_commander.protocol import (
     BatchDocumentPreviewItemResult,
     BatchDocumentPreviewResult,
     BatchDocumentPreviewSpec,
+    BatchPathMutationItemResult,
+    BatchPathMutationResult,
+    BatchPathMutationSpec,
     BinaryReadResult,
     BinaryWriteResult,
     CommandDiscoveryResult,
@@ -115,6 +118,82 @@ async def execute_many_commands(
         *(run_one(index, command) for index, command in enumerate(commands))
     )
     return BatchCommandResult(results=list(results))
+
+
+async def mutate_many_paths(
+    settings: Settings,
+    agent_id: str,
+    operations: list[BatchPathMutationSpec],
+    *,
+    stop_on_error: bool,
+) -> BatchPathMutationResult:
+    client = GatewayClient(settings)
+    results: list[BatchPathMutationItemResult] = []
+    stopped_early = False
+
+    for index, operation in enumerate(operations):
+        failed = False
+        try:
+            result = await client.mutate_path(
+                agent_id,
+                operation.operation,
+                operation.path,
+                destination=operation.destination,
+                parents=operation.parents,
+                overwrite=operation.overwrite,
+            )
+            results.append(
+                BatchPathMutationItemResult(
+                    index=index,
+                    operation=operation.operation,
+                    path=operation.path,
+                    result=result,
+                )
+            )
+            failed = result.rejected
+        except GatewayAPIError as exc:
+            results.append(
+                BatchPathMutationItemResult(
+                    index=index,
+                    operation=operation.operation,
+                    path=operation.path,
+                    status_code=exc.status_code,
+                    error=exc.detail,
+                )
+            )
+            failed = True
+        except httpx.HTTPError:
+            results.append(
+                BatchPathMutationItemResult(
+                    index=index,
+                    operation=operation.operation,
+                    path=operation.path,
+                    status_code=503,
+                    error="gateway request failed",
+                )
+            )
+            failed = True
+        except ValueError:
+            results.append(
+                BatchPathMutationItemResult(
+                    index=index,
+                    operation=operation.operation,
+                    path=operation.path,
+                    status_code=502,
+                    error="gateway response validation failed",
+                )
+            )
+            failed = True
+
+        if failed and stop_on_error and index + 1 < len(operations):
+            stopped_early = True
+            break
+
+    return BatchPathMutationResult(
+        results=results,
+        completed_count=len(results),
+        stopped_early=stopped_early,
+    )
 
 
 async def preview_many_documents(
@@ -950,6 +1029,22 @@ def build_mcp(settings: Settings) -> MCPServer:
             expected_tree_sha256,
             max_entries=max_entries,
             max_total_bytes=max_total_bytes,
+        )
+
+    @server.tool()
+    async def mutate_paths(
+        agent_id: str,
+        operations: Annotated[
+            list[BatchPathMutationSpec], Field(min_length=1, max_length=16)
+        ],
+        stop_on_error: bool = True,
+    ) -> BatchPathMutationResult:
+        """Run up to 16 filesystem mutations sequentially in input order."""
+        return await mutate_many_paths(
+            settings,
+            agent_id,
+            operations,
+            stop_on_error=stop_on_error,
         )
 
     @server.tool()
