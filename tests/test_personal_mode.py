@@ -82,3 +82,20 @@ def test_personal_capabilities_enable_command_pty_and_files(
     assert "filesystem.discovery" in capabilities
     assert "file.read" in capabilities
     assert "file.write" in capabilities
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "chmod", "rsync", "ssh", "scp", "jq", "openssl", "nvidia-smi",
+        "ffmpeg", "ffprobe", "sqlite3", "psql", "tmux", "screen", "watch",
+        "sha256sum", "diff", "patch", "timeout",
+    ],
+)
+def test_personal_mode_allows_common_developer_and_ops_profiles(name: str) -> None:
+    assert validate_generic_argv([name], mode="personal") is None
+
+
+@pytest.mark.parametrize("name", ["sudo", "kill", "pkill", "dd", "mkfs", "mount"])
+def test_personal_mode_keeps_high_risk_or_duplicate_profiles_blocked(name: str) -> None:
+    assert validate_generic_argv([name], mode="personal") is not None
