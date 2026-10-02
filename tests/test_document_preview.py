@@ -106,24 +106,33 @@ async def test_preview_rejects_symlink_document(tmp_path: Path) -> None:
     assert "symlink" in (result.error or "")
 
 
-def test_pdf_preview_uses_fixed_bounded_argv(
+def test_pdf_preview_reports_page_navigation(
     monkeypatch: pytest.MonkeyPatch, tmp_path: Path
 ) -> None:
     path = tmp_path / "sample.pdf"
     path.write_bytes(b"%PDF-placeholder")
     monkeypatch.setattr(document_ops, "PDFTOTEXT_PATH", Path("/bin/true"))
+    monkeypatch.setattr(document_ops, "PDFINFO_PATH", Path("/bin/true"))
     calls: list[list[str]] = []
 
     def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
         calls.append(argv)
+        if len(argv) == 2:
+            return subprocess.CompletedProcess(argv, 0, stdout=b"Pages:          8\n", stderr=b"")
         return subprocess.CompletedProcess(argv, 0, stdout=b"PDF text\n", stderr=b"")
 
     monkeypatch.setattr(document_ops.subprocess, "run", fake_run)
-    content, truncated = document_ops._pdf_preview(path, page=3, max_pages=2, max_chars=100)
+    content, truncated, total, returned, next_page = document_ops._pdf_preview(
+        path, page=3, max_pages=2, max_chars=100
+    )
     assert content == "PDF text\n"
     assert truncated is False
-    assert calls[0][:5] == ["/bin/true", "-f", "3", "-l", "4"]
-    assert calls[0][-2:] == [str(path), "-"]
+    assert total == 8
+    assert returned == 2
+    assert next_page == 5
+    assert calls[0] == ["/bin/true", str(path)]
+    assert calls[1][:5] == ["/bin/true", "-f", "3", "-l", "4"]
+    assert calls[1][-2:] == [str(path), "-"]
 
 
 @pytest.mark.asyncio
@@ -144,3 +153,99 @@ async def test_preview_docx_rejects_dtd(tmp_path: Path) -> None:
     result = await document_ops.preview_document("req", str(path), roots=[tmp_path])
     assert result.rejected is True
     assert "DTD/entity" in (result.error or "")
+
+
+STRUCTURED_WORD_DOCUMENT = """<?xml version="1.0" encoding="UTF-8"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:body>
+    <w:p><w:pPr><w:pStyle w:val="H1"/></w:pPr><w:r><w:t>Overview</w:t></w:r></w:p>
+    <w:p><w:r><w:t>Body text</w:t></w:r></w:p>
+    <w:p><w:pPr><w:sectPr/></w:pPr></w:p>
+    <w:p><w:pPr><w:pStyle w:val="H2"/></w:pPr><w:r><w:t>Details</w:t></w:r></w:p>
+    <w:sectPr/>
+  </w:body>
+</w:document>
+"""
+
+WORD_STYLES = """<?xml version="1.0" encoding="UTF-8"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:style w:type="paragraph" w:styleId="H1"><w:name w:val="Heading 1"/></w:style>
+  <w:style w:type="paragraph" w:styleId="H2"><w:name w:val="Heading 2"/></w:style>
+</w:styles>
+"""
+
+
+def make_structured_docx(path: Path) -> None:
+    with zipfile.ZipFile(path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
+        zf.writestr("word/document.xml", STRUCTURED_WORD_DOCUMENT)
+        zf.writestr("word/styles.xml", WORD_STYLES)
+
+
+@pytest.mark.asyncio
+async def test_preview_docx_preserves_heading_and_section_structure(tmp_path: Path) -> None:
+    path = tmp_path / "structured.docx"
+    make_structured_docx(path)
+    result = await document_ops.preview_document("req", str(path), roots=[tmp_path])
+    assert result.rejected is False
+    assert [(heading.level, heading.text) for heading in result.headings] == [
+        (1, "Overview"),
+        (2, "Details"),
+    ]
+    assert result.section_breaks == 1
+    assert "# Overview\n" in result.content
+    assert "## Details\n" in result.content
+    assert "\n---\n" in result.content
+
+
+@pytest.mark.asyncio
+async def test_preview_xlsx_supports_normalized_cell_range(tmp_path: Path) -> None:
+    path = tmp_path / "sample.xlsx"
+    make_xlsx(path)
+    result = await document_ops.preview_document(
+        "req", str(path), roots=[tmp_path], cell_range="b1:b2"
+    )
+    assert result.rejected is False
+    assert result.cell_range == "B1:B2"
+    assert result.rows_returned == 2
+    assert result.content == "7\nTRUE\n"
+
+
+@pytest.mark.asyncio
+async def test_preview_xlsx_range_preserves_blank_rows_and_bounds_output(tmp_path: Path) -> None:
+    path = tmp_path / "sample.xlsx"
+    make_xlsx(path)
+    result = await document_ops.preview_document(
+        "req", str(path), roots=[tmp_path], cell_range="A1:B4", max_rows=3
+    )
+    assert result.rejected is False
+    assert result.cell_range == "A1:B4"
+    assert result.rows_returned == 3
+    assert result.content == "Name\t7\nAlice\tTRUE\n\t\n"
+    assert result.truncated is True
+
+
+@pytest.mark.asyncio
+async def test_preview_xlsx_rejects_reversed_range(tmp_path: Path) -> None:
+    path = tmp_path / "sample.xlsx"
+    make_xlsx(path)
+    result = await document_ops.preview_document(
+        "req", str(path), roots=[tmp_path], cell_range="B2:A1"
+    )
+    assert result.rejected is True
+    assert "start must not be after" in (result.error or "")
+
+
+def test_pdf_preview_rejects_page_beyond_total(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+) -> None:
+    path = tmp_path / "sample.pdf"
+    path.write_bytes(b"%PDF-placeholder")
+    monkeypatch.setattr(document_ops, "PDFTOTEXT_PATH", Path("/bin/true"))
+    monkeypatch.setattr(document_ops, "PDFINFO_PATH", Path("/bin/true"))
+
+    def fake_run(argv: list[str], **kwargs: object) -> subprocess.CompletedProcess[bytes]:
+        return subprocess.CompletedProcess(argv, 0, stdout=b"Pages: 2\n", stderr=b"")
+
+    monkeypatch.setattr(document_ops.subprocess, "run", fake_run)
+    with pytest.raises(ValueError, match="exceeds total pages 2"):
+        document_ops._pdf_preview(path, page=3, max_pages=1, max_chars=100)

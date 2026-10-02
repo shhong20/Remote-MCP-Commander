@@ -502,6 +502,7 @@ async def agent_loop() -> None:
                                 page=request.page,
                                 max_pages=request.max_pages,
                                 sheet=request.sheet,
+                                cell_range=request.cell_range,
                                 max_rows=request.max_rows,
                                 max_chars=request.max_chars,
                             )

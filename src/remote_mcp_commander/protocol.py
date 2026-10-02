@@ -195,6 +195,11 @@ class FileReadResult(BaseModel):
 DocumentKind = Literal["pdf", "docx", "xlsx"]
 
 
+class DocumentHeading(BaseModel):
+    level: int = Field(ge=1, le=9)
+    text: str = Field(min_length=1, max_length=1024)
+
+
 class DocumentPreviewRequest(BaseModel):
     type: Literal["document_preview_request"] = "document_preview_request"
     request_id: str
@@ -202,6 +207,12 @@ class DocumentPreviewRequest(BaseModel):
     page: int = Field(default=1, ge=1, le=100_000)
     max_pages: int = Field(default=5, ge=1, le=20)
     sheet: str | None = Field(default=None, min_length=1, max_length=128)
+    cell_range: str | None = Field(
+        default=None,
+        min_length=5,
+        max_length=32,
+        pattern=r"^[A-Za-z]{1,3}[1-9][0-9]{0,6}:[A-Za-z]{1,3}[1-9][0-9]{0,6}$",
+    )
     max_rows: int = Field(default=200, ge=1, le=1000)
     max_chars: int = Field(default=65_536, ge=1024, le=262_144)
 
@@ -216,9 +227,15 @@ class DocumentPreviewResult(BaseModel):
     sha256: str | None = None
     page: int | None = None
     pages_requested: int | None = None
+    pages_total: int | None = None
+    pages_returned: int = 0
+    next_page: int | None = None
     sheets: list[str] = Field(default_factory=list)
     sheet: str | None = None
+    cell_range: str | None = None
     rows_returned: int = 0
+    headings: list[DocumentHeading] = Field(default_factory=list)
+    section_breaks: int = 0
     truncated: bool = False
     rejected: bool = False
     error: str | None = None
@@ -395,6 +412,12 @@ class DocumentPreviewBody(BaseModel):
     page: int = Field(default=1, ge=1, le=100_000)
     max_pages: int = Field(default=5, ge=1, le=20)
     sheet: str | None = Field(default=None, min_length=1, max_length=128)
+    cell_range: str | None = Field(
+        default=None,
+        min_length=5,
+        max_length=32,
+        pattern=r"^[A-Za-z]{1,3}[1-9][0-9]{0,6}:[A-Za-z]{1,3}[1-9][0-9]{0,6}$",
+    )
     max_rows: int = Field(default=200, ge=1, le=1000)
     max_chars: int = Field(default=65_536, ge=1024, le=262_144)
 

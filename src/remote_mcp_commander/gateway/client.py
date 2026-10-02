@@ -487,6 +487,7 @@ class GatewayClient:
         page: int = 1,
         max_pages: int = 5,
         sheet: str | None = None,
+        cell_range: str | None = None,
         max_rows: int = 200,
         max_chars: int = 65_536,
     ) -> DocumentPreviewResult:
@@ -498,6 +499,7 @@ class GatewayClient:
                 "page": page,
                 "max_pages": max_pages,
                 "sheet": sheet,
+                "cell_range": cell_range,
                 "max_rows": max_rows,
                 "max_chars": max_chars,
             },

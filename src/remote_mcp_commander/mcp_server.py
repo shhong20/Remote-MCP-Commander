@@ -461,16 +461,18 @@ def build_mcp(settings: Settings) -> MCPServer:
         page: int = 1,
         max_pages: int = 5,
         sheet: str | None = None,
+        cell_range: str | None = None,
         max_rows: int = 200,
         max_chars: int = 65_536,
     ) -> DocumentPreviewResult:
-        """Preview bounded text from PDF, DOCX, or XLSX inside Agent allowed roots."""
+        """Preview bounded PDF pages, DOCX structure, or an XLSX sheet/range."""
         return await GatewayClient(settings).preview_document(
             agent_id,
             path,
             page=page,
             max_pages=max_pages,
             sheet=sheet,
+            cell_range=cell_range,
             max_rows=max_rows,
             max_chars=max_chars,
         )

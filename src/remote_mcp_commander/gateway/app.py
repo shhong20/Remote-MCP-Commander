@@ -1783,8 +1783,16 @@ async def preview_agent_document(
         if not isinstance(reply, DocumentPreviewResult):
             raise HTTPException(status_code=502, detail="unexpected agent response")
         audit(
-            "document_preview", agent_id=agent_id, path=body.path, kind=reply.kind,
-            rejected=reply.rejected, truncated=reply.truncated,
+            "document_preview",
+            agent_id=agent_id,
+            path=body.path,
+            kind=reply.kind,
+            page=body.page if reply.kind == "pdf" else None,
+            pages_returned=reply.pages_returned if reply.kind == "pdf" else None,
+            sheet=body.sheet if reply.kind == "xlsx" else None,
+            cell_range=body.cell_range if reply.kind == "xlsx" else None,
+            rejected=reply.rejected,
+            truncated=reply.truncated,
         )
         return reply
     except TimeoutError as exc:
