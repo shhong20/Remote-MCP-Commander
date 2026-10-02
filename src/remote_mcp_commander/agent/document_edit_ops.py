@@ -109,6 +109,8 @@ def _publish_temp(
 ) -> str:
     if temp_path.stat().st_size > DOCUMENT_MAX_INPUT_BYTES:
         raise ValueError("edited document exceeds size limit")
+    with temp_path.open("rb") as handle:
+        os.fsync(handle.fileno())
     _revalidate_before_publish(
         path,
         expected_sha256=expected_sha256,
@@ -116,8 +118,6 @@ def _publish_temp(
     )
     if os.name != "nt":
         os.chmod(temp_path, mode)
-    with temp_path.open("rb") as handle:
-        os.fsync(handle.fileno())
     os.replace(temp_path, path)
     _fsync_directory(path.parent)
     return file_sha256(path)
