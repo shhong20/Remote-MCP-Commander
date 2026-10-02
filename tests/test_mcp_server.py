@@ -1,6 +1,7 @@
 import asyncio
 import base64
 
+import httpx
 import pytest
 from mcp import Client
 
@@ -10,13 +11,16 @@ from remote_mcp_commander.mcp_server import (
     build_mcp,
     execute_many_commands,
     preview_many_documents,
+    read_multiple_file_contents,
 )
 from remote_mcp_commander.protocol import (
     BatchCommandSpec,
     BatchDocumentPreviewSpec,
     CommandResult,
     DocumentPreviewResult,
+    FileReadResult,
     ImagePreviewResult,
+    MultiFileReadSpec,
 )
 
 
@@ -57,6 +61,7 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "preview_document",
         "preview_documents",
         "preview_image",
+        "read_multiple_files",
         "read_file",
         "read_file_lines",
         "tail_file",
@@ -139,6 +144,22 @@ async def test_execute_schema_requires_structured_argv() -> None:
     assert batch_spec["required"] == ["path"]
     assert batch_spec["properties"]["max_chars"]["default"] == 32_768
     assert batch_spec["properties"]["max_chars"]["maximum"] == 65_536
+
+    multi_read_schema = next(
+        tool for tool in result.tools if tool.name == "read_multiple_files"
+    ).input_schema
+    assert set(multi_read_schema["required"]) == {"agent_id", "files"}
+    assert multi_read_schema["properties"]["files"]["minItems"] == 1
+    assert multi_read_schema["properties"]["files"]["maxItems"] == 8
+    assert multi_read_schema["properties"]["max_concurrency"]["default"] == 4
+    assert multi_read_schema["properties"]["max_concurrency"]["minimum"] == 1
+    assert multi_read_schema["properties"]["max_concurrency"]["maximum"] == 4
+    multi_spec = multi_read_schema["$defs"]["MultiFileReadSpec"]
+    assert multi_spec["required"] == ["path"]
+    assert multi_spec["properties"]["max_chars"]["default"] == 32_768
+    assert multi_spec["properties"]["max_chars"]["maximum"] == 65_536
+    assert multi_spec["properties"]["max_bytes"]["default"] == 32_768
+    assert multi_spec["properties"]["max_bytes"]["maximum"] == 65_536
 
     batch_schema = next(
         tool for tool in result.tools if tool.name == "execute_many"
@@ -628,3 +649,196 @@ async def test_preview_image_rejection_becomes_tool_error(monkeypatch) -> None:
 
     assert result.is_error is True
     assert "1 MiB" in result.content[0].text
+
+
+@pytest.mark.asyncio
+async def test_read_multiple_files_routes_mixed_inputs_and_preserves_order(monkeypatch) -> None:
+    raw = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    )
+    active = 0
+    max_active = 0
+    routes: list[tuple[str, str]] = []
+
+    async def enter(route: str, path: str) -> None:
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        routes.append((route, path))
+        await asyncio.sleep(0.01)
+        active -= 1
+
+    async def fake_read_file(self, agent_id, path, **kwargs):
+        await enter("text", path)
+        return FileReadResult(
+            request_id="text",
+            path=path,
+            content="hello text",
+            size=10,
+            next_offset=10,
+            eof=True,
+            sha256="a" * 64,
+        )
+
+    async def fake_preview_document(self, agent_id, path, **kwargs):
+        await enter("document", path)
+        return DocumentPreviewResult(
+            request_id="doc",
+            path=path,
+            kind="xlsx",
+            content="A\tB\n",
+            size=20,
+            sha256="b" * 64,
+            sheet="Data",
+            rows_returned=1,
+        )
+
+    async def fake_preview_image(self, agent_id, path):
+        await enter("image", path)
+        return ImagePreviewResult(
+            request_id="image",
+            path=path,
+            format="png",
+            mime_type="image/png",
+            data_base64=base64.b64encode(raw).decode("ascii"),
+            size=len(raw),
+            width=1,
+            height=1,
+            sha256="c" * 64,
+        )
+
+    monkeypatch.setattr(GatewayClient, "read_file", fake_read_file)
+    monkeypatch.setattr(GatewayClient, "preview_document", fake_preview_document)
+    monkeypatch.setattr(GatewayClient, "preview_image", fake_preview_image)
+
+    result = await read_multiple_file_contents(
+        make_settings(),
+        "server-01",
+        [
+            MultiFileReadSpec(path="/home/ubuntu/notes.txt"),
+            MultiFileReadSpec(path="/home/ubuntu/report.XLSX", sheet="Data"),
+            MultiFileReadSpec(path="/home/ubuntu/pixel.PNG"),
+        ],
+        max_concurrency=2,
+    )
+
+    assert max_active == 2
+    assert routes == [
+        ("text", "/home/ubuntu/notes.txt"),
+        ("document", "/home/ubuntu/report.XLSX"),
+        ("image", "/home/ubuntu/pixel.PNG"),
+    ]
+    assert result[0].startswith("[0] /home/ubuntu/notes.txt | text")
+    assert "hello text" in result[0]
+    assert result[1].startswith("[1] /home/ubuntu/report.XLSX | kind=xlsx")
+    assert "A\tB" in result[1]
+    assert result[2].startswith("[2] /home/ubuntu/pixel.PNG | image/png | 1x1")
+    assert result[3].data is not None
+
+
+@pytest.mark.asyncio
+async def test_read_multiple_files_isolates_item_failures(monkeypatch) -> None:
+    async def fake_read_file(self, agent_id, path, **kwargs):
+        raise GatewayAPIError(403, "text denied")
+
+    async def fake_preview_document(self, agent_id, path, **kwargs):
+        return DocumentPreviewResult(
+            request_id="doc",
+            rejected=True,
+            error="document denied",
+        )
+
+    async def fake_preview_image(self, agent_id, path):
+        return ImagePreviewResult(
+            request_id="image",
+            rejected=True,
+            error="invalid PNG signature",
+        )
+
+    monkeypatch.setattr(GatewayClient, "read_file", fake_read_file)
+    monkeypatch.setattr(GatewayClient, "preview_document", fake_preview_document)
+    monkeypatch.setattr(GatewayClient, "preview_image", fake_preview_image)
+
+    result = await read_multiple_file_contents(
+        make_settings(),
+        "server-01",
+        [
+            MultiFileReadSpec(path="/home/ubuntu/a.txt"),
+            MultiFileReadSpec(path="/home/ubuntu/b.pdf"),
+            MultiFileReadSpec(path="/home/ubuntu/c.png"),
+        ],
+        max_concurrency=3,
+    )
+
+    assert len(result) == 3
+    assert "ERROR 403: text denied" in result[0]
+    assert "ERROR: document denied" in result[1]
+    assert "ERROR: invalid PNG signature" in result[2]
+
+
+@pytest.mark.asyncio
+async def test_read_multiple_files_bounds_total_image_content(monkeypatch) -> None:
+    raw = base64.b64decode(
+        "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+    )
+
+    async def fake_preview_image(self, agent_id, path):
+        return ImagePreviewResult(
+            request_id=path,
+            path=path,
+            format="png",
+            mime_type="image/png",
+            data_base64=base64.b64encode(raw).decode("ascii"),
+            size=len(raw),
+            width=1,
+            height=1,
+            sha256="d" * 64,
+        )
+
+    monkeypatch.setattr(GatewayClient, "preview_image", fake_preview_image)
+    monkeypatch.setitem(
+        read_multiple_file_contents.__globals__,
+        "_MULTI_READ_MAX_IMAGE_BYTES",
+        len(raw),
+    )
+
+    result = await read_multiple_file_contents(
+        make_settings(),
+        "server-01",
+        [
+            MultiFileReadSpec(path="/home/ubuntu/one.png"),
+            MultiFileReadSpec(path="/home/ubuntu/two.png"),
+        ],
+        max_concurrency=2,
+    )
+
+    assert len(result) == 3
+    assert result[0].startswith("[0] /home/ubuntu/one.png | image/png")
+    assert result[1].data is not None
+    assert "2 MiB batch image budget was exceeded" in result[2]
+
+
+@pytest.mark.asyncio
+async def test_read_multiple_files_isolates_gateway_transport_and_validation_failures(
+    monkeypatch,
+) -> None:
+    async def fake_read_file(self, agent_id, path, **kwargs):
+        if path.endswith("network.txt"):
+            raise httpx.ConnectError("connection failed")
+        raise ValueError("malformed gateway payload")
+
+    monkeypatch.setattr(GatewayClient, "read_file", fake_read_file)
+
+    result = await read_multiple_file_contents(
+        make_settings(),
+        "server-01",
+        [
+            MultiFileReadSpec(path="/home/ubuntu/network.txt"),
+            MultiFileReadSpec(path="/home/ubuntu/invalid.txt"),
+        ],
+        max_concurrency=2,
+    )
+
+    assert len(result) == 2
+    assert "ERROR 503: gateway request failed" in result[0]
+    assert "ERROR 502: gateway response validation failed" in result[1]

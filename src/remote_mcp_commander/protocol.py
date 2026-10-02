@@ -295,6 +295,22 @@ class ImagePreviewResult(BaseModel):
     error: str | None = None
 
 
+class MultiFileReadSpec(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+    page: int = Field(default=1, ge=1, le=100_000)
+    max_pages: int = Field(default=5, ge=1, le=20)
+    sheet: str | None = Field(default=None, min_length=1, max_length=128)
+    cell_range: str | None = Field(
+        default=None,
+        min_length=5,
+        max_length=32,
+        pattern=r"^[A-Za-z]{1,3}[1-9][0-9]{0,6}:[A-Za-z]{1,3}[1-9][0-9]{0,6}$",
+    )
+    max_rows: int = Field(default=200, ge=1, le=1000)
+    max_chars: int = Field(default=32_768, ge=1024, le=65_536)
+    max_bytes: int = Field(default=32_768, ge=1024, le=65_536)
+
+
 class FileReadManyRequest(BaseModel):
     type: Literal["file_read_many_request"] = "file_read_many_request"
     request_id: str
