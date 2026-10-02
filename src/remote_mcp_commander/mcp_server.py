@@ -46,6 +46,8 @@ from remote_mcp_commander.protocol import (
     DirectoryListResult,
     DirectoryTreeResult,
     DocumentPreviewResult,
+    DownloadChunkResult,
+    DownloadStartResult,
     FileAppendResult,
     FileEditResult,
     FileInfoResult,
@@ -86,8 +88,13 @@ from remote_mcp_commander.protocol import (
     SessionListResult,
     SessionSignalResult,
     SystemHealthResult,
+    TransferCloseResult,
+    TransferStatusResult,
     TreeInspectResult,
     TreeMutationResult,
+    UploadChunkResult,
+    UploadFinishResult,
+    UploadStartResult,
 )
 
 
@@ -880,6 +887,79 @@ def build_mcp(settings: Settings) -> MCPServer:
             overwrite=overwrite,
             expected_sha256=expected_sha256,
         )
+
+    @server.tool()
+    async def start_file_upload(
+        agent_id: str,
+        path: str,
+        size: Annotated[int, Field(ge=0, le=1_073_741_824)],
+        sha256: Annotated[str, Field(pattern=r"^[0-9a-f]{64}$")],
+        overwrite: bool = False,
+        expected_sha256: Annotated[
+            str | None, Field(pattern=r"^[0-9a-f]{64}$")
+        ] = None,
+    ) -> UploadStartResult:
+        """Start a resumable bounded upload session for a large file."""
+        return await GatewayClient(settings).start_upload_transfer(
+            agent_id,
+            path,
+            size,
+            sha256,
+            overwrite=overwrite,
+            expected_sha256=expected_sha256,
+        )
+
+    @server.tool()
+    async def upload_file_chunk(
+        agent_id: str,
+        session_id: str,
+        offset: Annotated[int, Field(ge=0, le=1_073_741_824)],
+        data_base64: Annotated[str, Field(max_length=349_528)],
+    ) -> UploadChunkResult:
+        """Append or idempotently replay one <=256 KiB base64 upload chunk."""
+        return await GatewayClient(settings).upload_transfer_chunk(
+            agent_id, session_id, offset, data_base64
+        )
+
+    @server.tool()
+    async def finish_file_upload(
+        agent_id: str, session_id: str
+    ) -> UploadFinishResult:
+        """Verify full upload SHA-256 and atomically publish the completed file."""
+        return await GatewayClient(settings).finish_upload_transfer(agent_id, session_id)
+
+    @server.tool()
+    async def start_file_download(
+        agent_id: str, path: str
+    ) -> DownloadStartResult:
+        """Start a stable large-file download session and compute its SHA-256."""
+        return await GatewayClient(settings).start_download_transfer(agent_id, path)
+
+    @server.tool()
+    async def download_file_chunk(
+        agent_id: str,
+        session_id: str,
+        offset: Annotated[int, Field(ge=0, le=1_073_741_824)] = 0,
+        max_bytes: Annotated[int, Field(ge=1, le=262_144)] = 262_144,
+    ) -> DownloadChunkResult:
+        """Read one stable <=256 KiB chunk from a large-file download session."""
+        return await GatewayClient(settings).download_transfer_chunk(
+            agent_id, session_id, offset=offset, max_bytes=max_bytes
+        )
+
+    @server.tool()
+    async def file_transfer_status(
+        agent_id: str, session_id: str
+    ) -> TransferStatusResult:
+        """Read progress and expiry metadata for one active file-transfer session."""
+        return await GatewayClient(settings).transfer_status(agent_id, session_id)
+
+    @server.tool()
+    async def close_file_transfer(
+        agent_id: str, session_id: str
+    ) -> TransferCloseResult:
+        """Close a transfer; unfinished uploads are discarded and downloads are released."""
+        return await GatewayClient(settings).close_transfer(agent_id, session_id)
 
     @server.tool()
     async def append_file(

@@ -48,6 +48,7 @@ from remote_mcp_commander.agent.system_ops import (
     signal_process,
     terminate_process,
 )
+from remote_mcp_commander.agent.transfer_ops import FileTransferManager
 from remote_mcp_commander.agent.tree_ops import inspect_tree, mutate_tree
 from remote_mcp_commander.config import get_settings
 from remote_mcp_commander.protocol import (
@@ -69,6 +70,8 @@ from remote_mcp_commander.protocol import (
     DirectoryListRequest,
     DirectoryTreeRequest,
     DocumentPreviewRequest,
+    DownloadChunkRequest,
+    DownloadStartRequest,
     FileAppendRequest,
     FileEditRequest,
     FileInfoRequest,
@@ -110,8 +113,13 @@ from remote_mcp_commander.protocol import (
     SessionSignalRequest,
     SessionSignalResult,
     SystemHealthRequest,
+    TransferCloseRequest,
+    TransferStatusRequest,
     TreeInspectRequest,
     TreeMutationRequest,
+    UploadChunkRequest,
+    UploadFinishRequest,
+    UploadStartRequest,
 )
 
 
@@ -174,6 +182,12 @@ async def agent_loop() -> None:
                 search_sessions = FileSearchSessionManager(roots=roots)
                 search_starts = FileSearchStartDispatcher(search_sessions)
                 line_waits = LineOutputWaitDispatcher(sessions, pty_sessions)
+                transfers = FileTransferManager(
+                    roots=roots,
+                    max_bytes=settings.transfer_max_bytes,
+                    ttl_s=settings.transfer_session_ttl_s,
+                    max_active=settings.transfer_max_active,
+                )
                 hello = AgentHello(
                     agent_id=settings.agent_id,
                     hostname=socket.gethostname(),
@@ -185,6 +199,7 @@ async def agent_loop() -> None:
                 )
                 await websocket.send(hello.model_dump_json())
                 heartbeat_task = asyncio.create_task(heartbeat_loop(websocket, settings.agent_id))
+                transfer_reaper_task = asyncio.create_task(transfers.reaper_loop())
                 try:
                     async for raw in websocket:
                         payload = json.loads(raw)
@@ -525,6 +540,74 @@ async def agent_loop() -> None:
                             await websocket.send(result.model_dump_json())
                             continue
 
+                        if message_type == "upload_start_request":
+                            request = UploadStartRequest.model_validate(payload)
+                            result = await transfers.start_upload(
+                                request.request_id,
+                                request.session_id,
+                                request.path,
+                                size=request.size,
+                                sha256=request.sha256,
+                                overwrite=request.overwrite,
+                                expected_sha256=request.expected_sha256,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "upload_chunk_request":
+                            request = UploadChunkRequest.model_validate(payload)
+                            result = await transfers.upload_chunk(
+                                request.request_id,
+                                request.session_id,
+                                offset=request.offset,
+                                data_base64=request.data_base64,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "upload_finish_request":
+                            request = UploadFinishRequest.model_validate(payload)
+                            result = await transfers.finish_upload(
+                                request.request_id, request.session_id
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "download_start_request":
+                            request = DownloadStartRequest.model_validate(payload)
+                            result = await transfers.start_download(
+                                request.request_id, request.session_id, request.path
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "download_chunk_request":
+                            request = DownloadChunkRequest.model_validate(payload)
+                            result = await transfers.download_chunk(
+                                request.request_id,
+                                request.session_id,
+                                offset=request.offset,
+                                max_bytes=request.max_bytes,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "transfer_status_request":
+                            request = TransferStatusRequest.model_validate(payload)
+                            result = await transfers.status(
+                                request.request_id, request.session_id
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "transfer_close_request":
+                            request = TransferCloseRequest.model_validate(payload)
+                            result = await transfers.close(
+                                request.request_id, request.session_id
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
                         if message_type == "document_preview_request":
                             request = DocumentPreviewRequest.model_validate(payload)
                             result = await preview_document(
@@ -771,14 +854,18 @@ async def agent_loop() -> None:
                         await one_shot.submit(request, websocket.send)
                 finally:
                     heartbeat_task.cancel()
+                    transfer_reaper_task.cancel()
                     await asyncio.gather(
                         sessions.cancel_all(),
                         pty_sessions.cancel_all(),
                         one_shot.cancel_all(),
                         search_starts.cancel_all(),
                         line_waits.cancel_all(),
+                        transfers.close_all(),
                     )
-                    await asyncio.gather(heartbeat_task, return_exceptions=True)
+                    await asyncio.gather(
+                        heartbeat_task, transfer_reaper_task, return_exceptions=True
+                    )
         except (OSError, websockets.ConnectionClosed):
             await asyncio.sleep(2)
 

@@ -22,6 +22,8 @@ from remote_mcp_commander.protocol import (
     DirectoryListResult,
     DirectoryTreeResult,
     DocumentPreviewResult,
+    DownloadChunkResult,
+    DownloadStartResult,
     FileAppendResult,
     FileEditResult,
     FileInfoResult,
@@ -57,8 +59,13 @@ from remote_mcp_commander.protocol import (
     SessionListResult,
     SessionSignalResult,
     SystemHealthResult,
+    TransferCloseResult,
+    TransferStatusResult,
     TreeInspectResult,
     TreeMutationResult,
+    UploadChunkResult,
+    UploadFinishResult,
+    UploadStartResult,
 )
 
 
@@ -569,6 +576,102 @@ class GatewayClient:
             },
         )
         return BinaryWriteResult.model_validate(payload)
+
+    async def start_upload_transfer(
+        self,
+        agent_id: str,
+        path: str,
+        size: int,
+        sha256: str,
+        *,
+        overwrite: bool = False,
+        expected_sha256: str | None = None,
+    ) -> UploadStartResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/files/transfers/upload",
+            json_body={
+                "path": path,
+                "size": size,
+                "sha256": sha256,
+                "overwrite": overwrite,
+                "expected_sha256": expected_sha256,
+            },
+            timeout_s=self.settings.transfer_request_timeout_s,
+        )
+        return UploadStartResult.model_validate(payload)
+
+    async def upload_transfer_chunk(
+        self,
+        agent_id: str,
+        session_id: str,
+        offset: int,
+        data_base64: str,
+    ) -> UploadChunkResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/files/transfers/{session_id}/upload-chunk",
+            json_body={"offset": offset, "data_base64": data_base64},
+            timeout_s=self.settings.transfer_request_timeout_s,
+        )
+        return UploadChunkResult.model_validate(payload)
+
+    async def finish_upload_transfer(
+        self, agent_id: str, session_id: str
+    ) -> UploadFinishResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/files/transfers/{session_id}/finish-upload",
+            timeout_s=self.settings.transfer_request_timeout_s,
+        )
+        return UploadFinishResult.model_validate(payload)
+
+    async def start_download_transfer(
+        self, agent_id: str, path: str
+    ) -> DownloadStartResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/files/transfers/download",
+            json_body={"path": path},
+            timeout_s=self.settings.transfer_request_timeout_s,
+        )
+        return DownloadStartResult.model_validate(payload)
+
+    async def download_transfer_chunk(
+        self,
+        agent_id: str,
+        session_id: str,
+        *,
+        offset: int = 0,
+        max_bytes: int = 262_144,
+    ) -> DownloadChunkResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/files/transfers/{session_id}/download-chunk",
+            json_body={"offset": offset, "max_bytes": max_bytes},
+            timeout_s=self.settings.transfer_request_timeout_s,
+        )
+        return DownloadChunkResult.model_validate(payload)
+
+    async def transfer_status(
+        self, agent_id: str, session_id: str
+    ) -> TransferStatusResult:
+        payload = await self._request(
+            "GET",
+            f"/api/v1/agents/{agent_id}/files/transfers/{session_id}",
+            timeout_s=self.settings.transfer_request_timeout_s,
+        )
+        return TransferStatusResult.model_validate(payload)
+
+    async def close_transfer(
+        self, agent_id: str, session_id: str
+    ) -> TransferCloseResult:
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/files/transfers/{session_id}/close",
+            timeout_s=self.settings.transfer_request_timeout_s,
+        )
+        return TransferCloseResult.model_validate(payload)
 
     async def read_file_lines(
         self, agent_id: str, path: str, *, offset: int = 0, max_lines: int = 200

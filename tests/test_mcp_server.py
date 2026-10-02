@@ -72,6 +72,13 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "read_files",
         "write_file",
         "write_binary",
+        "start_file_upload",
+        "upload_file_chunk",
+        "finish_file_upload",
+        "start_file_download",
+        "download_file_chunk",
+        "file_transfer_status",
+        "close_file_transfer",
         "append_file",
         "edit_file",
         "search_files",
@@ -183,6 +190,33 @@ async def test_execute_schema_requires_structured_argv() -> None:
     assert binary_write_schema["properties"]["data_base64"]["maxLength"] == 1_398_104
     assert binary_write_schema["properties"]["overwrite"]["default"] is False
     assert binary_write_schema["properties"]["expected_sha256"]["default"] is None
+
+    upload_start_schema = next(
+        tool for tool in result.tools if tool.name == "start_file_upload"
+    ).input_schema
+    assert set(upload_start_schema["required"]) == {"agent_id", "path", "size", "sha256"}
+    assert upload_start_schema["properties"]["size"]["maximum"] == 1_073_741_824
+    assert upload_start_schema["properties"]["overwrite"]["default"] is False
+
+    upload_chunk_schema = next(
+        tool for tool in result.tools if tool.name == "upload_file_chunk"
+    ).input_schema
+    assert set(upload_chunk_schema["required"]) == {
+        "agent_id", "session_id", "offset", "data_base64"
+    }
+    assert upload_chunk_schema["properties"]["data_base64"]["maxLength"] == 349_528
+
+    download_chunk_schema = next(
+        tool for tool in result.tools if tool.name == "download_file_chunk"
+    ).input_schema
+    assert set(download_chunk_schema["required"]) == {"agent_id", "session_id"}
+    assert download_chunk_schema["properties"]["offset"]["default"] == 0
+    assert download_chunk_schema["properties"]["max_bytes"]["maximum"] == 262_144
+
+    transfer_status_schema = next(
+        tool for tool in result.tools if tool.name == "file_transfer_status"
+    ).input_schema
+    assert set(transfer_status_schema["required"]) == {"agent_id", "session_id"}
 
     mutation_batch_schema = next(
         tool for tool in result.tools if tool.name == "mutate_paths"

@@ -63,6 +63,8 @@ def test_capabilities_reflect_available_tools_and_allowed_roots(
         "file.read_many",
         "file.binary_read",
         "file.binary_write",
+        "file.transfer_upload",
+        "file.transfer_download",
         "document.preview",
         "image.preview",
         "file.write",
