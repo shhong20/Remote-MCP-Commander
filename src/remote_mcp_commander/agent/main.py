@@ -35,6 +35,7 @@ from remote_mcp_commander.agent.line_wait_dispatcher import LineOutputWaitDispat
 from remote_mcp_commander.agent.one_shot import OneShotCommandDispatcher
 from remote_mcp_commander.agent.path_ops import mutate_path
 from remote_mcp_commander.agent.pdf_ops import compose_pdf_pages
+from remote_mcp_commander.agent.pdf_render_ops import render_pdf_from_markdown
 from remote_mcp_commander.agent.pty_ops import PtySessionManager
 from remote_mcp_commander.agent.search_ops import search_files
 from remote_mcp_commander.agent.search_session_ops import (
@@ -94,6 +95,7 @@ from remote_mcp_commander.protocol import (
     ImagePreviewRequest,
     PathMutationRequest,
     PdfComposeRequest,
+    PdfRenderRequest,
     PingRequest,
     PingResult,
     PortLookupRequest,
@@ -663,6 +665,19 @@ async def agent_loop() -> None:
                                 request.request_id,
                                 request.output_path,
                                 request.sources,
+                                roots=roots,
+                                overwrite=request.overwrite,
+                                expected_sha256=request.expected_sha256,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "pdf_render_request":
+                            request = PdfRenderRequest.model_validate(payload)
+                            result = await render_pdf_from_markdown(
+                                request.request_id,
+                                request.output_path,
+                                request.markdown,
                                 roots=roots,
                                 overwrite=request.overwrite,
                                 expected_sha256=request.expected_sha256,

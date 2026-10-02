@@ -68,6 +68,7 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "replace_docx_text",
         "edit_xlsx_range",
         "compose_pdf_pages",
+        "create_pdf_from_markdown",
         "preview_documents",
         "preview_image",
         "read_multiple_files",
@@ -216,6 +217,18 @@ async def test_execute_schema_requires_structured_argv() -> None:
     assert pdf_source["properties"]["start_page"]["default"] == 1
     assert pdf_source["properties"]["start_page"]["maximum"] == 100_000
     assert pdf_source["properties"]["end_page"]["anyOf"][0]["maximum"] == 100_000
+
+    pdf_render_schema = next(
+        tool for tool in result.tools if tool.name == "create_pdf_from_markdown"
+    ).input_schema
+    assert set(pdf_render_schema["required"]) == {"agent_id", "output_path", "markdown"}
+    assert pdf_render_schema["properties"]["markdown"]["maxLength"] == 262_144
+    assert pdf_render_schema["properties"]["overwrite"]["default"] is False
+    assert pdf_render_schema["properties"]["expected_sha256"]["default"] is None
+    assert (
+        pdf_render_schema["properties"]["expected_sha256"]["anyOf"][0]["pattern"]
+        == "^[a-f0-9]{64}$"
+    )
 
     binary_read_schema = next(
         tool for tool in result.tools if tool.name == "read_binary"

@@ -47,6 +47,8 @@ from remote_mcp_commander.protocol import (
     PdfComposeBody,
     PdfComposeResult,
     PdfPageSource,
+    PdfRenderBody,
+    PdfRenderResult,
     PingResponse,
     PortLookupResult,
     ProcessInfoResult,
@@ -620,6 +622,29 @@ class GatewayClient:
             timeout_s=max(self.settings.mcp_gateway_timeout_s, 95.0),
         )
         return PdfComposeResult.model_validate(payload)
+
+    async def render_pdf_from_markdown(
+        self,
+        agent_id: str,
+        output_path: str,
+        markdown: str,
+        *,
+        overwrite: bool = False,
+        expected_sha256: str | None = None,
+    ) -> PdfRenderResult:
+        body = PdfRenderBody(
+            output_path=output_path,
+            markdown=markdown,
+            overwrite=overwrite,
+            expected_sha256=expected_sha256,
+        )
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/pdf/render",
+            json_body=body.model_dump(),
+            timeout_s=max(self.settings.mcp_gateway_timeout_s, 110.0),
+        )
+        return PdfRenderResult.model_validate(payload)
 
     async def preview_image(self, agent_id: str, path: str) -> ImagePreviewResult:
         payload = await self._request(
