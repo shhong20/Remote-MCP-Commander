@@ -69,3 +69,7 @@ When MCP tool definitions change, restart the MCP service and use ChatGPT Plugin
 ## Additional developer and transfer utilities
 
 The built-in Personal generic profile also includes `gh`, `git-lfs`, `rclone`, `zstd`, `unzstd`, `pzstd`, and `pigz` when they resolve in the Agent user's PATH. These tools may perform authenticated remote mutations using credentials already available to that OS user, so they remain subject to the same single-user Personal-mode trust boundary and audit trail as other generic commands.
+
+## Bounded batch command execution
+
+`execute_many(agent_id, commands, max_concurrency=4)` runs up to 16 independent structured command requests while limiting concurrency to at most four. Each item uses the normal Gateway `execute` path, so command policy, cwd/env validation, timeout/output bounds, executable resolution, and audit events are applied independently. A policy rejection for one item is returned as that item's error instead of cancelling unrelated commands.

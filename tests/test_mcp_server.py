@@ -1,8 +1,12 @@
+import asyncio
+
 import pytest
 from mcp import Client
 
 from remote_mcp_commander.config import Settings
-from remote_mcp_commander.mcp_server import build_mcp
+from remote_mcp_commander.gateway.client import GatewayAPIError, GatewayClient
+from remote_mcp_commander.mcp_server import build_mcp, execute_many_commands
+from remote_mcp_commander.protocol import BatchCommandSpec, CommandResult
 
 
 def make_settings(**overrides: object) -> Settings:
@@ -34,6 +38,7 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "service_logs",
         "git_status",
         "execute",
+        "execute_many",
         "list_file_roots",
         "list_directory",
         "list_directory_tree",
@@ -96,6 +101,16 @@ async def test_execute_schema_requires_structured_argv() -> None:
     assert schema["required"] == ["agent_id", "argv"]
     assert "timeout_s" in schema["properties"]
     assert "timeout_s" not in schema["required"]
+
+    batch_schema = next(
+        tool for tool in result.tools if tool.name == "execute_many"
+    ).input_schema
+    assert set(batch_schema["required"]) == {"agent_id", "commands"}
+    assert batch_schema["properties"]["commands"]["minItems"] == 1
+    assert batch_schema["properties"]["commands"]["maxItems"] == 16
+    assert batch_schema["properties"]["max_concurrency"]["default"] == 4
+    assert batch_schema["properties"]["max_concurrency"]["minimum"] == 1
+    assert batch_schema["properties"]["max_concurrency"]["maximum"] == 4
 
 
     config_schema = next(
@@ -359,3 +374,49 @@ async def test_list_commands_schema_requires_only_agent_id() -> None:
         result = await client.list_tools()
     tool = next(item for item in result.tools if item.name == "list_commands")
     assert set(tool.input_schema["required"]) == {"agent_id"}
+
+
+@pytest.mark.asyncio
+async def test_execute_many_preserves_input_order_and_bounds_concurrency(monkeypatch) -> None:
+    active = 0
+    max_active = 0
+
+    async def fake_execute(self, agent_id, argv, **kwargs):
+        nonlocal active, max_active
+        active += 1
+        max_active = max(max_active, active)
+        await asyncio.sleep(0.01)
+        active -= 1
+        return CommandResult(request_id=argv[1], returncode=0, stdout=argv[1])
+
+    monkeypatch.setattr(GatewayClient, "execute", fake_execute)
+    commands = [BatchCommandSpec(argv=["echo", str(i)]) for i in range(6)]
+    result = await execute_many_commands(
+        make_settings(), "server-01", commands, max_concurrency=2
+    )
+    assert [item.index for item in result.results] == list(range(6))
+    assert [item.result.stdout for item in result.results if item.result] == [
+        str(i) for i in range(6)
+    ]
+    assert max_active == 2
+
+
+@pytest.mark.asyncio
+async def test_execute_many_isolates_gateway_policy_failure(monkeypatch) -> None:
+    async def fake_execute(self, agent_id, argv, **kwargs):
+        if argv[0] == "blocked":
+            raise GatewayAPIError(403, "policy denied")
+        return CommandResult(request_id="ok", returncode=0, stdout="ok")
+
+    monkeypatch.setattr(GatewayClient, "execute", fake_execute)
+    result = await execute_many_commands(
+        make_settings(),
+        "server-01",
+        [BatchCommandSpec(argv=["blocked"]), BatchCommandSpec(argv=["echo", "ok"])],
+        max_concurrency=2,
+    )
+    assert result.results[0].status_code == 403
+    assert result.results[0].error == "policy denied"
+    assert result.results[0].result is None
+    assert result.results[1].result is not None
+    assert result.results[1].result.stdout == "ok"
