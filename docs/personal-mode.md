@@ -57,3 +57,11 @@ This profile boundary is a structured-API preference, not an OS sandbox guarante
 Personal mode can extend the built-in generic command set without a code change by adding bare executable names to `COMMANDER_ALLOWED_EXECUTABLES` on both the Gateway and Agent. For example, `COMMANDER_ALLOWED_EXECUTABLES=uv,poetry` makes those names eligible for the generic command path when they resolve in the Agent user's effective `PATH`.
 
 Custom profiles remain fail-closed: names must be bare executable names, the Gateway must allow the same name, the Agent allowlist must contain it, and the executable must resolve on the Agent. Hardened mode ignores custom widening and remains limited to the built-in safe generic profiles. This mechanism does not bypass OS permissions or the existing cwd/env/output/session bounds.
+
+## Runtime introspection
+
+After refreshing the ChatGPT plugin connection, `get_runtime_config(agent_id)` returns a sanitized snapshot of the connected Agent: Commander/Agent versions, protocol version, operation mode, advertised capabilities, allowed filesystem roots, and currently resolvable generic/PTY command names. Credentials, environment values, executable paths, and command output are not included.
+
+`get_recent_activity(limit=50, event=None, agent_id=None)` exposes the Gateway's existing bounded audit query through MCP. The audit reader retains its existing sensitive-field redaction and scan bound, so this is intended for recovering recent operational context and diagnosing failed actions rather than reproducing command contents.
+
+When MCP tool definitions change, restart the MCP service and use ChatGPT Plugins **Refresh** before testing in a new conversation. ChatGPT may otherwise continue using the previously scanned tool snapshot.

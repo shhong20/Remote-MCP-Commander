@@ -43,6 +43,29 @@ async def test_list_devices_parses_gateway_response() -> None:
 
 
 @pytest.mark.asyncio
+async def test_list_audit_records_sends_bounded_filters() -> None:
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/api/v1/audit"
+        assert request.url.params["limit"] == "25"
+        assert request.url.params["event"] == "command_requested"
+        assert request.url.params["agent_id"] == "server-01"
+        return httpx.Response(
+            200,
+            json={
+                "records": [{"event": "command_requested", "agent_id": "server-01"}],
+                "scan_truncated": False,
+            },
+        )
+
+    client = GatewayClient(make_settings(), transport=httpx.MockTransport(handler))
+    result = await client.list_audit_records(
+        limit=25, event="command_requested", agent_id="server-01"
+    )
+    assert result.records[0]["event"] == "command_requested"
+    assert result.scan_truncated is False
+
+
+@pytest.mark.asyncio
 async def test_gateway_error_preserves_status_and_detail() -> None:
     def handler(request: httpx.Request) -> httpx.Response:
         return httpx.Response(403, json={"detail": "policy denied"})

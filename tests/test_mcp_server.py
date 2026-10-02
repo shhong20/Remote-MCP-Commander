@@ -26,6 +26,8 @@ async def test_mcp_exposes_minimal_remote_tools() -> None:
         "list_devices",
         "list_commands",
         "device_info",
+        "get_runtime_config",
+        "get_recent_activity",
         "ping_device",
         "system_health",
         "lookup_port",
@@ -94,6 +96,19 @@ async def test_execute_schema_requires_structured_argv() -> None:
     assert schema["required"] == ["agent_id", "argv"]
     assert "timeout_s" in schema["properties"]
     assert "timeout_s" not in schema["required"]
+
+
+    config_schema = next(
+        tool for tool in result.tools if tool.name == "get_runtime_config"
+    ).input_schema
+    assert config_schema["required"] == ["agent_id"]
+
+    activity_schema = next(
+        tool for tool in result.tools if tool.name == "get_recent_activity"
+    ).input_schema
+    assert activity_schema["properties"]["limit"]["default"] == 50
+    assert "event" not in activity_schema.get("required", [])
+    assert "agent_id" not in activity_schema.get("required", [])
 
 
 def test_streamable_http_requires_mcp_token() -> None:
