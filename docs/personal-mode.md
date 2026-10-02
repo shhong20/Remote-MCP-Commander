@@ -65,3 +65,7 @@ After refreshing the ChatGPT plugin connection, `get_runtime_config(agent_id)` r
 `get_recent_activity(limit=50, event=None, agent_id=None)` exposes the Gateway's existing bounded audit query through MCP. The audit reader retains its existing sensitive-field redaction and scan bound, so this is intended for recovering recent operational context and diagnosing failed actions rather than reproducing command contents.
 
 When MCP tool definitions change, restart the MCP service and use ChatGPT Plugins **Refresh** before testing in a new conversation. ChatGPT may otherwise continue using the previously scanned tool snapshot.
+
+## Additional developer and transfer utilities
+
+The built-in Personal generic profile also includes `gh`, `git-lfs`, `rclone`, `zstd`, `unzstd`, `pzstd`, and `pigz` when they resolve in the Agent user's PATH. These tools may perform authenticated remote mutations using credentials already available to that OS user, so they remain subject to the same single-user Personal-mode trust boundary and audit trail as other generic commands.

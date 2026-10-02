@@ -90,6 +90,7 @@ def test_personal_capabilities_enable_command_pty_and_files(
         "chmod", "rsync", "ssh", "scp", "jq", "openssl", "nvidia-smi",
         "ffmpeg", "ffprobe", "sqlite3", "psql", "tmux", "screen", "watch",
         "sha256sum", "diff", "patch", "timeout",
+        "gh", "git-lfs", "rclone", "zstd", "unzstd", "pzstd", "pigz",
     ],
 )
 def test_personal_mode_allows_common_developer_and_ops_profiles(name: str) -> None:
