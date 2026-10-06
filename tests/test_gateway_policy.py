@@ -1,0 +1,205 @@
+import pytest
+from fastapi import HTTPException
+
+from remote_mcp_commander.config import Settings
+from remote_mcp_commander.gateway.app import (
+    enforce_agent_policy,
+    enforce_pty_policy,
+    pty_approval_target,
+    require_approval_admin_token,
+    validate_approval_target,
+    validate_command_session_id,
+)
+
+
+def make_settings(**overrides: str) -> Settings:
+    values = {
+        "agent_token": "default-agent-token-1234",
+        "control_token": "control-token-12345678",
+    }
+    values.update(overrides)
+    return Settings(**values)
+
+
+def test_agent_specific_token_overrides_default() -> None:
+    settings = make_settings(agent_tokens_json='{"server-01":"specific-token-123456"}')
+    assert settings.token_for_agent("server-01") == "specific-token-123456"
+    assert settings.token_for_agent("server-02") == "default-agent-token-1234"
+
+
+def test_gateway_policy_allows_listed_executable() -> None:
+    settings = make_settings(agent_policies_json='{"server-01":["hostname","uptime"]}')
+    enforce_agent_policy("server-01", ["hostname"], settings)
+
+
+def test_gateway_policy_denies_unlisted_executable() -> None:
+    settings = make_settings(agent_policies_json='{"server-01":["hostname"]}')
+    with pytest.raises(HTTPException) as exc_info:
+        enforce_agent_policy("server-01", ["whoami"], settings)
+    assert exc_info.value.status_code == 403
+
+
+def test_missing_gateway_policy_remains_agent_side_only() -> None:
+    settings = make_settings(agent_policies_json="{}")
+    enforce_agent_policy("server-99", ["whoami"], settings)
+
+
+def test_gateway_startup_rejects_example_credentials() -> None:
+    settings = make_settings(agent_token="change-me-agent-token")
+    with pytest.raises(ValueError, match="static Agent credentials"):
+        settings.validate_gateway_security()
+
+
+def test_agent_startup_rejects_example_credential() -> None:
+    settings = make_settings(agent_token="change-me-agent-token")
+    with pytest.raises(ValueError, match="enroll the Agent"):
+        settings.validate_agent_security(settings.agent_token)
+
+
+def test_gateway_rejects_shared_control_and_approval_credentials() -> None:
+    settings = make_settings(approval_admin_token="control-token-12345678")
+    with pytest.raises(ValueError, match="must be unique"):
+        settings.validate_gateway_security()
+
+
+def test_gateway_accepts_distinct_approval_admin_credential() -> None:
+    settings = make_settings(approval_admin_token="approval-admin-token-1234")
+    settings.validate_gateway_security()
+
+
+def test_remote_audit_security_requires_safe_url_and_distinct_credential() -> None:
+    with pytest.raises(ValueError, match="needs COMMANDER_AUDIT_REMOTE_URL"):
+        make_settings(audit_remote_required="true").validate_gateway_security()
+
+    with pytest.raises(ValueError, match="remote URL must use https"):
+        make_settings(
+            audit_remote_url="http://audit.example.test/events"
+        ).validate_gateway_security()
+
+    with pytest.raises(ValueError, match="remote audit credential must be unique"):
+        make_settings(
+            audit_remote_url="https://audit.example.test/events",
+            audit_remote_token="control-token-12345678",
+        ).validate_gateway_security()
+
+    make_settings(
+        audit_remote_url="http://127.0.0.1:9000/events",
+        audit_remote_token="remote-audit-token-1234",
+    ).validate_gateway_security()
+
+
+def test_gateway_rejects_unprofiled_generic_execute_even_if_host_policy_allows() -> None:
+    settings = make_settings(agent_policies_json='{"server-01":["systemctl"]}')
+    with pytest.raises(HTTPException) as exc_info:
+        enforce_agent_policy("server-01", ["systemctl", "restart", "demo.service"], settings)
+    assert exc_info.value.status_code == 403
+    assert "no safe generic profile" in str(exc_info.value.detail)
+
+
+def test_approval_admin_is_separate_from_control_auth() -> None:
+    settings = make_settings(approval_admin_token="approval-admin-token-1234")
+    with pytest.raises(HTTPException) as exc_info:
+        require_approval_admin_token(settings, "Bearer control-token-12345678")
+    assert exc_info.value.status_code == 401
+    require_approval_admin_token(settings, "Bearer approval-admin-token-1234")
+
+
+def test_approval_target_is_operation_specific() -> None:
+    validate_approval_target("process.terminate", "pid:123@456789")
+    validate_approval_target("process.signal.kill", "pid:123@456789")
+    validate_approval_target("service.restart", "demo.service")
+    validate_approval_target("pty.start", pty_approval_target(["bash"]))
+    with pytest.raises(HTTPException) as exc_info:
+        validate_approval_target("process.terminate", "demo.service")
+    assert exc_info.value.status_code == 422
+
+
+def test_pty_policy_is_separate_and_fails_closed() -> None:
+    settings = make_settings(
+        agent_policies_json='{"server-01":["bash"]}',
+        pty_agent_policies_json="{}",
+    )
+    with pytest.raises(HTTPException) as exc_info:
+        enforce_pty_policy("server-01", ["bash"], settings)
+    assert exc_info.value.status_code == 403
+    assert "PTY policy denied" in str(exc_info.value.detail)
+
+    allowed = make_settings(pty_agent_policies_json='{"server-01":["bash"]}')
+    enforce_pty_policy("server-01", ["bash"], allowed)
+
+
+def test_pty_approval_target_binds_full_argv() -> None:
+    first = pty_approval_target(["bash"])
+    second = pty_approval_target(["bash", "-l"])
+    assert first != second
+    assert first.startswith("argv-sha256:")
+    with pytest.raises(HTTPException):
+        validate_approval_target("pty.start", "bash")
+
+
+
+
+def test_pty_approval_target_binds_environment() -> None:
+    base = pty_approval_target(["bash"], "/srv/app", {"DEMO": "one"})
+    changed = pty_approval_target(["bash"], "/srv/app", {"DEMO": "two"})
+    assert base != changed
+    assert pty_approval_target(["bash"]) == pty_approval_target(["bash"], None, None)
+
+def test_pty_policy_rejects_absolute_executable() -> None:
+    settings = make_settings(pty_agent_policies_json='{"server-01":["bash"]}')
+    with pytest.raises(HTTPException) as exc_info:
+        enforce_pty_policy("server-01", ["/bin/bash"], settings)
+    assert "bare executable name" in str(exc_info.value.detail)
+
+
+def test_command_session_id_validation() -> None:
+    validate_command_session_id("a" * 32)
+    with pytest.raises(HTTPException) as exc_info:
+        validate_command_session_id("../bad-session")
+    assert exc_info.value.status_code == 422
+
+
+def test_gateway_policy_rejects_absolute_safe_name_alias() -> None:
+    settings = make_settings(agent_policies_json='{"server-01":["hostname"]}')
+    with pytest.raises(HTTPException) as exc_info:
+        enforce_agent_policy("server-01", ["/tmp/hostname"], settings)
+    assert exc_info.value.status_code == 403
+    assert "bare name" in str(exc_info.value.detail)
+
+
+def test_command_protocol_rejects_oversized_argument() -> None:
+    from pydantic import ValidationError
+
+    from remote_mcp_commander.protocol import ExecuteBody
+
+    with pytest.raises(ValidationError):
+        ExecuteBody(argv=["echo", "x" * 4097])
+
+
+
+
+def test_command_protocol_rejects_invalid_or_oversized_environment() -> None:
+    from pydantic import ValidationError
+
+    from remote_mcp_commander.protocol import ExecuteBody
+
+    with pytest.raises(ValidationError):
+        ExecuteBody(argv=["echo", "ok"], env={"BAD-NAME": "1"})
+    with pytest.raises(ValidationError):
+        ExecuteBody(argv=["echo", "ok"], env={f"VAR_{i}": "1" for i in range(33)})
+
+def test_personal_gateway_policy_allows_broad_developer_commands() -> None:
+    settings = make_settings(operation_mode="personal")
+
+    enforce_agent_policy("server-01", ["ls", "-la"], settings)
+    enforce_agent_policy("server-01", ["bash", "-lc", "printf ok"], settings)
+
+
+def test_personal_gateway_pty_policy_uses_personal_defaults_when_unconfigured() -> None:
+    settings = make_settings(operation_mode="personal", pty_agent_policies_json="{}")
+
+    enforce_pty_policy("server-01", ["bash"], settings)
+
+    with pytest.raises(HTTPException) as exc_info:
+        enforce_pty_policy("server-01", ["sudo"], settings)
+    assert exc_info.value.status_code == 403

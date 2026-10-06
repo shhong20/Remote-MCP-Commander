@@ -1,0 +1,65 @@
+[build-system]
+requires = ["setuptools==84.0.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "remote-mcp-commander"
+version = "0.73.0"
+description = "Self-hosted outbound-agent remote command bridge for MCP/AI clients"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "cryptography>=45,<51",
+  "fastapi>=0.116,<1",
+  "httpx>=0.28,<1",
+  "openpyxl==3.1.5",
+  "mcp>=2,<3",
+  "psutil>=7,<8",
+  "pydantic>=2.11,<3",
+  "pydantic-settings>=2.10,<3",
+  "PyJWT[crypto]>=2.10.1,<3",
+  "uvicorn[standard]>=0.35,<1",
+  "websockets>=15,<16",
+]
+
+[project.optional-dependencies]
+dev = [
+  "pytest>=8.4,<9",
+  "pytest-asyncio>=1.1,<2",
+  "ruff>=0.12,<1",
+]
+packaging = [
+  "pip==26.2.1",
+  "build==1.6.1",
+  "setuptools==84.0.0",
+  "wheel==0.48.0",
+]
+
+[project.scripts]
+remote-mcp-gateway = "remote_mcp_commander.gateway.app:run"
+remote-mcp-agent = "remote_mcp_commander.agent.main:run"
+remote-mcp-enroll = "remote_mcp_commander.agent.enroll:run"
+remote-mcp-server = "remote_mcp_commander.mcp_server:run"
+remote-mcp-tunnel-stdio = "remote_mcp_commander.tunnel_stdio:run"
+remote-mcp-connect-check = "remote_mcp_commander.connect_check:run"
+remote-mcp-doctor = "remote_mcp_commander.doctor:run"
+remote-mcp-release = "remote_mcp_commander.release:run"
+remote-mcp-package = "remote_mcp_commander.package:run"
+remote-mcp-runtime = "remote_mcp_commander.runtime_lock:run"
+remote-mcp-artifact = "remote_mcp_commander.artifact_registry:run"
+remote-mcp-pty-target = "remote_mcp_commander.pty_target:run"
+remote-mcp-audit = "remote_mcp_commander.audit_cli:run"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
