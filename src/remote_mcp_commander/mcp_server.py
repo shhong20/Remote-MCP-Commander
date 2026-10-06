@@ -23,6 +23,9 @@ from remote_mcp_commander.gateway.client import GatewayAPIError, GatewayClient
 from remote_mcp_commander.oauth import OAuthTokenVerifier
 from remote_mcp_commander.protocol import (
     AgentInfo,
+    ArchiveCreateResult,
+    ArchiveExtractResult,
+    ArchiveInspectResult,
     AuditQueryResult,
     BatchCommandItemResult,
     BatchCommandResult,
@@ -834,6 +837,44 @@ def build_mcp(settings: Settings) -> MCPServer:
             sheet,
             cell_range,
             values,
+            expected_sha256=expected_sha256,
+        )
+
+    @server.tool()
+    async def inspect_archive(agent_id: str, path: str) -> ArchiveInspectResult:
+        """Inspect a bounded ZIP/TAR archive without extracting it."""
+        return await GatewayClient(settings).inspect_archive(agent_id, path)
+
+    @server.tool()
+    async def extract_archive(
+        agent_id: str,
+        path: str,
+        destination: str,
+    ) -> ArchiveExtractResult:
+        """Extract a bounded ZIP/TAR archive into a new directory."""
+        return await GatewayClient(settings).extract_archive(agent_id, path, destination)
+
+    @server.tool()
+    async def create_archive(
+        agent_id: str,
+        source_path: str,
+        output_path: str,
+        expected_tree_sha256: Annotated[
+            str, Field(min_length=64, max_length=64, pattern=r"^[a-f0-9]{64}$")
+        ],
+        overwrite: bool = False,
+        expected_sha256: Annotated[
+            str | None,
+            Field(default=None, min_length=64, max_length=64, pattern=r"^[a-f0-9]{64}$"),
+        ] = None,
+    ) -> ArchiveCreateResult:
+        """Create a bounded ZIP/TAR archive from an inspected directory tree."""
+        return await GatewayClient(settings).create_archive(
+            agent_id,
+            source_path,
+            output_path,
+            expected_tree_sha256=expected_tree_sha256,
+            overwrite=overwrite,
             expected_sha256=expected_sha256,
         )
 

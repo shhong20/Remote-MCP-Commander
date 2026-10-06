@@ -8,6 +8,7 @@ import socket
 import websockets
 
 from remote_mcp_commander import __version__
+from remote_mcp_commander.agent.archive_ops import create_archive, extract_archive, inspect_archive
 from remote_mcp_commander.agent.binary_ops import read_binary_file, write_binary_file
 from remote_mcp_commander.agent.capabilities import detect_capabilities, discover_commands
 from remote_mcp_commander.agent.diagnostics import lookup_port, service_logs, system_health
@@ -59,6 +60,9 @@ from remote_mcp_commander.protocol import (
     PROTOCOL_MAX_SUPPORTED,
     PROTOCOL_MIN_SUPPORTED,
     AgentHello,
+    ArchiveCreateRequest,
+    ArchiveExtractRequest,
+    ArchiveInspectRequest,
     BinaryReadRequest,
     BinaryWriteRequest,
     CommandDiscoveryRequest,
@@ -837,6 +841,39 @@ async def agent_loop() -> None:
                                 destination=request.destination,
                                 parents=request.parents,
                                 overwrite=request.overwrite,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "archive_inspect_request":
+                            request = ArchiveInspectRequest.model_validate(payload)
+                            result = await inspect_archive(
+                                request.request_id, request.path, roots=roots
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "archive_extract_request":
+                            request = ArchiveExtractRequest.model_validate(payload)
+                            result = await extract_archive(
+                                request.request_id,
+                                request.path,
+                                request.destination,
+                                roots=roots,
+                            )
+                            await websocket.send(result.model_dump_json())
+                            continue
+
+                        if message_type == "archive_create_request":
+                            request = ArchiveCreateRequest.model_validate(payload)
+                            result = await create_archive(
+                                request.request_id,
+                                request.source_path,
+                                request.output_path,
+                                roots=roots,
+                                expected_tree_sha256=request.expected_tree_sha256,
+                                overwrite=request.overwrite,
+                                expected_sha256=request.expected_sha256,
                             )
                             await websocket.send(result.model_dump_json())
                             continue

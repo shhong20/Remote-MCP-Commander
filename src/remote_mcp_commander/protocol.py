@@ -575,9 +575,7 @@ class PdfRewriteRequest(BaseModel):
     source_path: str = Field(min_length=1, max_length=4096)
     output_path: str = Field(min_length=1, max_length=4096)
     segments: list[PdfRewriteSegment] = Field(min_length=1, max_length=32)
-    expected_source_sha256: str = Field(
-        min_length=64, max_length=64, pattern=r"^[a-f0-9]{64}$"
-    )
+    expected_source_sha256: str = Field(min_length=64, max_length=64, pattern=r"^[a-f0-9]{64}$")
     overwrite: bool = False
     expected_output_sha256: str | None = Field(
         default=None, min_length=64, max_length=64, pattern=r"^[a-f0-9]{64}$"
@@ -587,9 +585,7 @@ class PdfRewriteRequest(BaseModel):
     def validate_rewrite(self) -> PdfRewriteRequest:
         _validate_pdf_rewrite_segments(self.segments)
         if self.overwrite and self.expected_output_sha256 is None:
-            raise ValueError(
-                "expected_output_sha256 is required when overwriting PDF output"
-            )
+            raise ValueError("expected_output_sha256 is required when overwriting PDF output")
         if not self.overwrite and self.expected_output_sha256 is not None:
             raise ValueError("expected_output_sha256 requires overwrite=true")
         return self
@@ -610,9 +606,7 @@ class PdfRewriteBody(BaseModel):
     source_path: str = Field(min_length=1, max_length=4096)
     output_path: str = Field(min_length=1, max_length=4096)
     segments: list[PdfRewriteSegment] = Field(min_length=1, max_length=32)
-    expected_source_sha256: str = Field(
-        min_length=64, max_length=64, pattern=r"^[a-f0-9]{64}$"
-    )
+    expected_source_sha256: str = Field(min_length=64, max_length=64, pattern=r"^[a-f0-9]{64}$")
     overwrite: bool = False
     expected_output_sha256: str | None = Field(
         default=None, min_length=64, max_length=64, pattern=r"^[a-f0-9]{64}$"
@@ -622,9 +616,7 @@ class PdfRewriteBody(BaseModel):
     def validate_rewrite(self) -> PdfRewriteBody:
         _validate_pdf_rewrite_segments(self.segments)
         if self.overwrite and self.expected_output_sha256 is None:
-            raise ValueError(
-                "expected_output_sha256 is required when overwriting PDF output"
-            )
+            raise ValueError("expected_output_sha256 is required when overwriting PDF output")
         if not self.overwrite and self.expected_output_sha256 is not None:
             raise ValueError("expected_output_sha256 requires overwrite=true")
         return self
@@ -648,18 +640,11 @@ def _validate_xlsx_edit_values(values: list[SpreadsheetRow]) -> None:
     if sum(len(row) for row in values) > XLSX_EDIT_MAX_CELLS:
         raise ValueError(f"XLSX edit exceeds {XLSX_EDIT_MAX_CELLS} cell limit")
     text_bytes = sum(
-        len(value.encode("utf-8"))
-        for row in values
-        for value in row
-        if isinstance(value, str)
+        len(value.encode("utf-8")) for row in values for value in row if isinstance(value, str)
     )
     if text_bytes > XLSX_EDIT_MAX_TEXT_BYTES:
         raise ValueError("XLSX edit text payload exceeds UTF-8 byte limit")
-    if any(
-        isinstance(value, str) and value.startswith("=")
-        for row in values
-        for value in row
-    ):
+    if any(isinstance(value, str) and value.startswith("=") for row in values for value in row):
         raise ValueError("XLSX formula injection is not supported by this editor")
 
 
@@ -1404,6 +1389,116 @@ class TreeMutationBody(BaseModel):
     expected_tree_sha256: str = Field(min_length=64, max_length=64)
     max_entries: int = Field(default=5000, ge=1, le=50_000)
     max_total_bytes: int = Field(default=268_435_456, ge=1, le=1_073_741_824)
+
+
+class ArchiveEntry(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+    size: int = Field(default=0, ge=0, le=268_435_456)
+    is_dir: bool = False
+
+
+class ArchiveInspectRequest(BaseModel):
+    type: Literal["archive_inspect_request"] = "archive_inspect_request"
+    request_id: str
+    path: str = Field(min_length=1, max_length=4096)
+
+
+class ArchiveInspectBody(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+
+
+class ArchiveInspectResult(BaseModel):
+    type: Literal["archive_inspect_result"] = "archive_inspect_result"
+    request_id: str
+    path: str = ""
+    format: Literal["zip", "tar", "tar.gz"] | None = None
+    archive_bytes: int = Field(default=0, ge=0)
+    entries: int = Field(default=0, ge=0, le=5000)
+    total_uncompressed_bytes: int = Field(default=0, ge=0)
+    sha256: str | None = None
+    listing: list[ArchiveEntry] = Field(default_factory=list, max_length=200)
+    listing_truncated: bool = False
+    rejected: bool = False
+    error: str | None = None
+
+
+class ArchiveExtractRequest(BaseModel):
+    type: Literal["archive_extract_request"] = "archive_extract_request"
+    request_id: str
+    path: str = Field(min_length=1, max_length=4096)
+    destination: str = Field(min_length=1, max_length=4096)
+
+
+class ArchiveExtractBody(BaseModel):
+    path: str = Field(min_length=1, max_length=4096)
+    destination: str = Field(min_length=1, max_length=4096)
+
+
+class ArchiveExtractResult(BaseModel):
+    type: Literal["archive_extract_result"] = "archive_extract_result"
+    request_id: str
+    path: str = ""
+    destination: str = ""
+    format: Literal["zip", "tar", "tar.gz"] | None = None
+    entries: int = Field(default=0, ge=0, le=5000)
+    total_uncompressed_bytes: int = Field(default=0, ge=0)
+    archive_sha256: str | None = None
+    changed: bool = False
+    rejected: bool = False
+    error: str | None = None
+
+
+class ArchiveCreateRequest(BaseModel):
+    type: Literal["archive_create_request"] = "archive_create_request"
+    request_id: str
+    source_path: str = Field(min_length=1, max_length=4096)
+    output_path: str = Field(min_length=1, max_length=4096)
+    expected_tree_sha256: str = Field(min_length=64, max_length=64, pattern=r"^[a-f0-9]{64}$")
+    overwrite: bool = False
+    expected_sha256: str | None = Field(
+        default=None, min_length=64, max_length=64, pattern=r"^[a-f0-9]{64}$"
+    )
+
+    @model_validator(mode="after")
+    def validate_overwrite_guard(self) -> ArchiveCreateRequest:
+        if self.overwrite and self.expected_sha256 is None:
+            raise ValueError("expected_sha256 is required when overwriting archive output")
+        if not self.overwrite and self.expected_sha256 is not None:
+            raise ValueError("expected_sha256 requires overwrite=true")
+        return self
+
+
+class ArchiveCreateBody(BaseModel):
+    source_path: str = Field(min_length=1, max_length=4096)
+    output_path: str = Field(min_length=1, max_length=4096)
+    expected_tree_sha256: str = Field(min_length=64, max_length=64, pattern=r"^[a-f0-9]{64}$")
+    overwrite: bool = False
+    expected_sha256: str | None = Field(
+        default=None, min_length=64, max_length=64, pattern=r"^[a-f0-9]{64}$"
+    )
+
+    @model_validator(mode="after")
+    def validate_overwrite_guard(self) -> ArchiveCreateBody:
+        if self.overwrite and self.expected_sha256 is None:
+            raise ValueError("expected_sha256 is required when overwriting archive output")
+        if not self.overwrite and self.expected_sha256 is not None:
+            raise ValueError("expected_sha256 requires overwrite=true")
+        return self
+
+
+class ArchiveCreateResult(BaseModel):
+    type: Literal["archive_create_result"] = "archive_create_result"
+    request_id: str
+    source_path: str = ""
+    output_path: str = ""
+    format: Literal["zip", "tar", "tar.gz"] | None = None
+    entries: int = Field(default=0, ge=0, le=5000)
+    total_uncompressed_bytes: int = Field(default=0, ge=0)
+    archive_bytes: int = Field(default=0, ge=0)
+    sha256: str | None = None
+    changed: bool = False
+    rejected: bool = False
+    error: str | None = None
 
 
 class ProcessInfo(BaseModel):

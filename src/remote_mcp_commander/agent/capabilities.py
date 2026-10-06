@@ -71,6 +71,7 @@ def detect_capabilities(settings: Settings, roots: list[Path]) -> list[str]:
                 "file.transfer_download",
                 "document.preview",
                 "document.edit",
+                "archive.inspect",
                 "pdf.compose",
                 "image.preview",
                 "file.write",
@@ -84,7 +85,12 @@ def detect_capabilities(settings: Settings, roots: list[Path]) -> list[str]:
         if _pdf_rewrite_available():
             capabilities.add("pdf.rewrite")
         if settings.operation_mode == "personal":
-            capabilities.update({"filesystem.mutate", "filesystem.tree_mutate"})
+            capabilities.update({
+                "filesystem.mutate",
+                "filesystem.tree_mutate",
+                "archive.extract",
+                "archive.create",
+            })
         if shutil.which("git", path=TRUSTED_GIT_PATH) is not None:
             capabilities.add("git.status")
 

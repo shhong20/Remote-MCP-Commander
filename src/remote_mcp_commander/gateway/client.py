@@ -8,6 +8,12 @@ from remote_mcp_commander.config import Settings
 from remote_mcp_commander.protocol import (
     AgentInfo,
     AgentList,
+    ArchiveCreateBody,
+    ArchiveCreateResult,
+    ArchiveExtractBody,
+    ArchiveExtractResult,
+    ArchiveInspectBody,
+    ArchiveInspectResult,
     AuditQueryResult,
     BinaryReadResult,
     BinaryWriteResult,
@@ -602,6 +608,53 @@ class GatewayClient:
             timeout_s=max(self.settings.mcp_gateway_timeout_s, 35.0),
         )
         return DocumentEditResult.model_validate(payload)
+
+    async def inspect_archive(self, agent_id: str, path: str) -> ArchiveInspectResult:
+        body = ArchiveInspectBody(path=path)
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/archives/inspect",
+            json_body=body.model_dump(),
+            timeout_s=max(self.settings.mcp_gateway_timeout_s, 35.0),
+        )
+        return ArchiveInspectResult.model_validate(payload)
+
+    async def extract_archive(
+        self, agent_id: str, path: str, destination: str
+    ) -> ArchiveExtractResult:
+        body = ArchiveExtractBody(path=path, destination=destination)
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/archives/extract",
+            json_body=body.model_dump(),
+            timeout_s=max(self.settings.mcp_gateway_timeout_s, 100.0),
+        )
+        return ArchiveExtractResult.model_validate(payload)
+
+    async def create_archive(
+        self,
+        agent_id: str,
+        source_path: str,
+        output_path: str,
+        *,
+        expected_tree_sha256: str,
+        overwrite: bool = False,
+        expected_sha256: str | None = None,
+    ) -> ArchiveCreateResult:
+        body = ArchiveCreateBody(
+            source_path=source_path,
+            output_path=output_path,
+            expected_tree_sha256=expected_tree_sha256,
+            overwrite=overwrite,
+            expected_sha256=expected_sha256,
+        )
+        payload = await self._request(
+            "POST",
+            f"/api/v1/agents/{agent_id}/archives/create",
+            json_body=body.model_dump(),
+            timeout_s=max(self.settings.mcp_gateway_timeout_s, 130.0),
+        )
+        return ArchiveCreateResult.model_validate(payload)
 
     async def compose_pdf_pages(
         self,

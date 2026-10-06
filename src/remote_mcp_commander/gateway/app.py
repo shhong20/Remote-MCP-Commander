@@ -54,6 +54,15 @@ from remote_mcp_commander.protocol import (
     AgentList,
     ApprovalCreateBody,
     ApprovalTicket,
+    ArchiveCreateBody,
+    ArchiveCreateRequest,
+    ArchiveCreateResult,
+    ArchiveExtractBody,
+    ArchiveExtractRequest,
+    ArchiveExtractResult,
+    ArchiveInspectBody,
+    ArchiveInspectRequest,
+    ArchiveInspectResult,
     AuditQueryResult,
     AuditVerificationResult,
     BinaryReadBody,
@@ -249,6 +258,9 @@ from remote_mcp_commander.protocol import (
 
 AgentReply = (
     CommandResult
+    | ArchiveInspectResult
+    | ArchiveExtractResult
+    | ArchiveCreateResult
     | CommandDiscoveryResult
     | PingResult
     | FileReadResult
@@ -2059,6 +2071,120 @@ async def edit_agent_xlsx_range(
 
 
 @app.post(
+    "/api/v1/agents/{agent_id}/archives/inspect",
+    dependencies=[Depends(require_control_token)],
+)
+async def inspect_agent_archive(
+    agent_id: str, body: ArchiveInspectBody, settings: SettingsDep
+) -> ArchiveInspectResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "archive.inspect")
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = ArchiveInspectRequest(request_id=request_id, **body.model_dump())
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=max(settings.request_timeout_s, 30.0))
+        if not isinstance(reply, ArchiveInspectResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent archive inspection timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/archives/extract",
+    dependencies=[Depends(require_control_token)],
+)
+async def extract_agent_archive(
+    agent_id: str, body: ArchiveExtractBody, settings: SettingsDep
+) -> ArchiveExtractResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "archive.extract")
+    audit_required(
+        "archive_extract_requested",
+        agent_id=agent_id,
+        destination=body.destination,
+    )
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = ArchiveExtractRequest(request_id=request_id, **body.model_dump())
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=max(settings.request_timeout_s, 90.0))
+        if not isinstance(reply, ArchiveExtractResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "archive_extract",
+            agent_id=agent_id,
+            destination=body.destination,
+            format=reply.format,
+            entries=reply.entries,
+            total_uncompressed_bytes=reply.total_uncompressed_bytes,
+            rejected=reply.rejected,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent archive extraction timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
+    "/api/v1/agents/{agent_id}/archives/create",
+    dependencies=[Depends(require_control_token)],
+)
+async def create_agent_archive(
+    agent_id: str, body: ArchiveCreateBody, settings: SettingsDep
+) -> ArchiveCreateResult:
+    connection = connections.get(agent_id)
+    if connection is None:
+        raise HTTPException(status_code=404, detail="agent not connected")
+    require_agent_capability(connection, "archive.create")
+    audit_required(
+        "archive_create_requested",
+        agent_id=agent_id,
+        output_path=body.output_path,
+        overwrite=body.overwrite,
+    )
+    request_id = uuid.uuid4().hex
+    future = pending_request(connection, request_id)
+    try:
+        request = ArchiveCreateRequest(request_id=request_id, **body.model_dump())
+        await connection.websocket.send_text(request.model_dump_json())
+        reply = await asyncio.wait_for(future, timeout=max(settings.request_timeout_s, 120.0))
+        if not isinstance(reply, ArchiveCreateResult):
+            raise HTTPException(status_code=502, detail="unexpected agent response")
+        audit(
+            "archive_create",
+            agent_id=agent_id,
+            output_path=body.output_path,
+            format=reply.format,
+            entries=reply.entries,
+            total_uncompressed_bytes=reply.total_uncompressed_bytes,
+            archive_bytes=reply.archive_bytes,
+            rejected=reply.rejected,
+        )
+        return reply
+    except TimeoutError as exc:
+        raise HTTPException(status_code=504, detail="agent archive creation timed out") from exc
+    except ConnectionError as exc:
+        raise HTTPException(status_code=503, detail="agent disconnected") from exc
+    finally:
+        connection.pending.pop(request_id, None)
+
+
+@app.post(
     "/api/v1/agents/{agent_id}/pdf/compose",
     dependencies=[Depends(require_control_token)],
 )
@@ -3667,6 +3793,12 @@ async def agent_socket(websocket: WebSocket, agent_id: str) -> None:
                 reply = DocumentPreviewResult.model_validate(payload)
             elif message_type == "document_edit_result":
                 reply = DocumentEditResult.model_validate(payload)
+            elif message_type == "archive_inspect_result":
+                reply = ArchiveInspectResult.model_validate(payload)
+            elif message_type == "archive_extract_result":
+                reply = ArchiveExtractResult.model_validate(payload)
+            elif message_type == "archive_create_result":
+                reply = ArchiveCreateResult.model_validate(payload)
             elif message_type == "pdf_compose_result":
                 reply = PdfComposeResult.model_validate(payload)
             elif message_type == "pdf_render_result":
