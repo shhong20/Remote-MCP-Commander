@@ -350,6 +350,7 @@ def configure_audit_for(settings: Settings):
     return configure_audit(
         settings.audit_file,
         fsync=settings.audit_fsync,
+        recover_truncated_tail=settings.audit_recover_truncated_tail,
         max_bytes=settings.audit_max_bytes,
         retention_files=settings.audit_retention_files,
         remote_url=settings.audit_remote_url,

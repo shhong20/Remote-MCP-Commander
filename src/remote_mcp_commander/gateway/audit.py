@@ -5,7 +5,9 @@ import hmac
 import json
 import logging
 import os
+import shutil
 import stat
+import tempfile
 import threading
 import uuid
 from datetime import UTC, datetime
@@ -41,6 +43,7 @@ _MAX_STRING_CHARS = 512
 _MAX_COLLECTION_ITEMS = 32
 _MAX_DEPTH = 4
 _GENESIS_HASH = "0" * 64
+_MAX_RECOVERABLE_TAIL_BYTES = 65_536
 _HASH_PATTERN = frozenset("0123456789abcdef")
 _CHAIN_FIELDS = {
     "audit_chain_id",
@@ -115,6 +118,7 @@ class AuditJournal:
         path: Path,
         *,
         fsync: bool = False,
+        recover_truncated_tail: bool = False,
         max_bytes: int = 16_777_216,
         retention_files: int = 5,
         remote_url: str = "",
@@ -129,6 +133,7 @@ class AuditJournal:
             raise ValueError("audit retention_files must be at least 1")
         self.path = path
         self.fsync = fsync
+        self.recover_truncated_tail = recover_truncated_tail
         self.max_bytes = max_bytes
         self.retention_files = retention_files
         self.remote_url = remote_url
@@ -221,6 +226,8 @@ class AuditJournal:
                 return self._verify_locked()
             self._create_current_locked()
             result = self._verify_locked()
+            if self.recover_truncated_tail and self._recover_truncated_tail_locked():
+                result = self._verify_locked()
             if not result.valid:
                 raise AuditIntegrityError(result.error or "audit chain verification failed")
             self._chain_id = result.chain_id or uuid.uuid4().hex
@@ -229,7 +236,106 @@ class AuditJournal:
             self._initialized = True
             return result
 
-    def _verify_locked(self) -> AuditVerificationResult:
+    def _recover_truncated_tail_locked(self) -> bool:
+        """Recover only an invalid, unterminated final line after validating the prefix.
+
+        Before replacing the current journal, keep a durable, owner-only copy
+        of its entire original contents for forensic analysis.
+        """
+        if os.name == "nt" or not self._lexists(self.path):
+            return False
+        with self._open_read(self.path) as source:
+            if fcntl is not None:
+                # Refuse recovery while a writer holds the append lock.
+                fcntl.flock(source.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+            metadata = os.fstat(source.fileno())
+            size = metadata.st_size
+            if size == 0:
+                return False
+            source.seek(-1, os.SEEK_END)
+            if source.read(1) == b"\n":
+                return False
+            take = min(size, _MAX_RECOVERABLE_TAIL_BYTES + 1)
+            source.seek(size - take)
+            window = source.read(take)
+            separator = window.rfind(b"\n")
+            if separator < 0 and size > take:
+                return False
+            tail = window[separator + 1 :]
+            if not tail or len(tail) > _MAX_RECOVERABLE_TAIL_BYTES:
+                return False
+            try:
+                json.loads(tail)
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                incomplete_json = True
+            else:
+                # JSON is complete but its newline was lost in the crash.
+                # Keep the authenticated record; only supply the delimiter.
+                incomplete_json = False
+
+            # This validates all retained rotations, sequence numbers, hashes,
+            # and every complete record in the current file.
+            prefix = self._verify_locked(allow_incomplete_tail=incomplete_json)
+            if not prefix.valid or not (prefix.checked_records or prefix.legacy_records):
+                return False
+
+            backup = self.path.with_name(f"{self.path.name}.recovery-{uuid.uuid4().hex}.backup")
+            fd = os.open(
+                backup, os.O_WRONLY | os.O_CREAT | os.O_EXCL | self._nofollow_flag(), 0o600
+            )
+            with os.fdopen(fd, "wb") as destination:
+                source.seek(0)
+                shutil.copyfileobj(source, destination)
+                destination.flush()
+                os.fsync(destination.fileno())
+            if backup.stat().st_size != size or os.fstat(source.fileno()).st_size != size:
+                raise AuditIntegrityError("audit file changed during recovery backup")
+
+            # Fsync the backup name before altering the source.
+            directory_fd = os.open(self.path.parent, os.O_RDONLY)
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+            fd, temporary = tempfile.mkstemp(prefix=".audit-repair-", dir=self.path.parent)
+            try:
+                with os.fdopen(fd, "wb") as destination:
+                    source.seek(0)
+                    remaining = size - len(tail) if incomplete_json else size
+                    while remaining:
+                        block = source.read(min(65_536, remaining))
+                        if not block:
+                            raise AuditIntegrityError("audit prefix changed during recovery")
+                        destination.write(block)
+                        remaining -= len(block)
+                    if not incomplete_json:
+                        destination.write(b"\n")
+                    destination.flush()
+                    os.fsync(destination.fileno())
+                current = os.lstat(self.path)
+                if not stat.S_ISREG(current.st_mode) or (
+                    current.st_dev,
+                    current.st_ino,
+                    current.st_size,
+                ) != (metadata.st_dev, metadata.st_ino, size):
+                    raise AuditIntegrityError("audit file changed during recovery")
+                os.replace(temporary, self.path)
+                directory_fd = os.open(self.path.parent, os.O_RDONLY)
+                try:
+                    os.fsync(directory_fd)
+                finally:
+                    os.close(directory_fd)
+            finally:
+                if os.path.lexists(temporary):
+                    os.unlink(temporary)
+            audit_logger.warning(
+                "Recovered interrupted audit append (%d discarded bytes); original saved at %s",
+                len(tail) if incomplete_json else 0,
+                backup,
+            )
+            return True
+
+    def _verify_locked(self, *, allow_incomplete_tail: bool = False) -> AuditVerificationResult:
         checked = 0
         legacy = 0
         retained_files = 0
@@ -250,6 +356,14 @@ class AuditJournal:
                         try:
                             record = json.loads(raw_line)
                         except (UnicodeDecodeError, json.JSONDecodeError):
+                            if (
+                                allow_incomplete_tail
+                                and path == self.path
+                                and raw_line
+                                and not raw_line.endswith(b"\n")
+                                and len(raw_line) <= _MAX_RECOVERABLE_TAIL_BYTES
+                            ):
+                                continue
                             return AuditVerificationResult(
                                 valid=False,
                                 checked_records=checked,
@@ -740,6 +854,7 @@ def configure_audit(
     path: Path,
     *,
     fsync: bool = False,
+    recover_truncated_tail: bool = False,
     max_bytes: int = 16_777_216,
     retention_files: int = 5,
     remote_url: str = "",
@@ -752,6 +867,7 @@ def configure_audit(
     journal = AuditJournal(
         path,
         fsync=fsync,
+        recover_truncated_tail=recover_truncated_tail,
         max_bytes=max_bytes,
         retention_files=retention_files,
         remote_url=remote_url,

@@ -41,6 +41,39 @@ The summary includes checked and legacy record counts, retained file count, sequ
 
 A plain hash chain is tamper-evident, not tamper-proof against an attacker who can rewrite every retained file and recompute the chain. Independent remote retention or externally recorded head hashes provide the necessary outside anchor.
 
+## Crash-interrupted final record recovery (opt-in)
+
+The default is **fail closed**: any malformed audit record blocks startup, even at EOF.
+On a single-user POSIX Gateway where availability after an abrupt host shutdown
+matters, explicitly enable the narrow recovery policy:
+
+```env
+COMMANDER_AUDIT_RECOVER_TRUNCATED_TAIL=true
+```
+
+If the active `audit.jsonl` ends with an unterminated final JSONL line,
+and all prior records/retained rotations pass hash-chain verification, startup
+may recover. A **malformed** final JSON line can be quarantined and removed;
+a **complete, valid chained JSON record without its final newline** is kept
+unchanged and only its missing delimiter is restored. Both cases require
+a bounded 64 KiB final line and at least one intact verified record. An exclusive append lock is acquired before
+verification. A full byte-for-byte copy of the original active journal is
+fsynced to `audit.jsonl.recovery-<random>.backup` (mode `0600`) before the
+verified prefix replaces the current file via fsynced atomic rename. The
+recovered Gateway logs a warning with the backup path and discarded byte count.
+
+**Never** automatically recover newline-terminated invalid JSON, corrupted
+hashes, sequence gaps, a damaged rotated file, or symlinks. Backups are excluded
+from normal rotation and must be retained for forensic review or archived
+separately. A malformed truncated final event may be lost even though the intact chain
+continues; a valid complete event without a newline is preserved. Because an attacker with audit-file write access can deliberately
+damage a final line, recovery is off by default. Use remote immutable audit
+shipping where stronger guarantees are required.
+
+The offline `remote-mcp-audit verify` command remains strict; it does not
+implicitly repair a file. To diagnose a startup refusal, keep the original
+backup and examine the Gateway's journal before enabling this option.
+
 ## Rotation and retention
 
 `COMMANDER_AUDIT_MAX_BYTES` defaults to 16 MiB. Before an append would exceed that size, the Gateway rotates:
