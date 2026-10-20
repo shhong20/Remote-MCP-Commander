@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     approval_ttl_s: int = Field(default=60, ge=15, le=600)
     audit_path: str = "~/.remote-mcp-commander/audit.jsonl"
     audit_fsync: bool = False
+    audit_recover_truncated_tail: bool = False
     audit_query_max_scan_bytes: int = Field(default=2_097_152, ge=65_536, le=16_777_216)
     audit_max_bytes: int = Field(default=16_777_216, ge=65_536, le=1_073_741_824)
     audit_retention_files: int = Field(default=5, ge=1, le=100)
