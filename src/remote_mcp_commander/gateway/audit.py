@@ -226,9 +226,8 @@ class AuditJournal:
                 return self._verify_locked()
             self._create_current_locked()
             result = self._verify_locked()
-            if not result.valid and self.recover_truncated_tail:
-                if self._recover_truncated_tail_locked():
-                    result = self._verify_locked()
+            if self.recover_truncated_tail and self._recover_truncated_tail_locked():
+                result = self._verify_locked()
             if not result.valid:
                 raise AuditIntegrityError(result.error or "audit chain verification failed")
             self._chain_id = result.chain_id or uuid.uuid4().hex
@@ -268,13 +267,15 @@ class AuditJournal:
             try:
                 json.loads(tail)
             except (UnicodeDecodeError, json.JSONDecodeError):
-                pass
+                incomplete_json = True
             else:
-                return False
+                # JSON is complete but its newline was lost in the crash.
+                # Keep the authenticated record; only supply the delimiter.
+                incomplete_json = False
 
             # This validates all retained rotations, sequence numbers, hashes,
             # and every complete record in the current file.
-            prefix = self._verify_locked(allow_incomplete_tail=True)
+            prefix = self._verify_locked(allow_incomplete_tail=incomplete_json)
             if not prefix.valid or not (prefix.checked_records or prefix.legacy_records):
                 return False
 
@@ -300,13 +301,15 @@ class AuditJournal:
             try:
                 with os.fdopen(fd, "wb") as destination:
                     source.seek(0)
-                    remaining = size - len(tail)
+                    remaining = size - len(tail) if incomplete_json else size
                     while remaining:
                         block = source.read(min(65_536, remaining))
                         if not block:
                             raise AuditIntegrityError("audit prefix changed during recovery")
                         destination.write(block)
                         remaining -= len(block)
+                    if not incomplete_json:
+                        destination.write(b"\n")
                     destination.flush()
                     os.fsync(destination.fileno())
                 current = os.lstat(self.path)
@@ -326,8 +329,8 @@ class AuditJournal:
                 if os.path.lexists(temporary):
                     os.unlink(temporary)
             audit_logger.warning(
-                "Recovered interrupted audit append (%d bytes); original saved at %s",
-                len(tail),
+                "Recovered interrupted audit append (%d discarded bytes); original saved at %s",
+                len(tail) if incomplete_json else 0,
                 backup,
             )
             return True

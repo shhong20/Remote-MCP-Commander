@@ -168,12 +168,29 @@ def test_too_large_truncated_tail_refuses_recovery(tmp_path):
     assert not _backups(path)
 
 
-def test_unexpected_valid_json_without_newline_is_not_dropped(tmp_path):
+def test_complete_json_missing_final_newline_is_preserved_and_delimited(tmp_path):
     path, intact = _create(tmp_path)
     path.write_bytes(intact[:-1])
     verification = AuditJournal(path, recover_truncated_tail=True).initialize()
     assert verification.valid
-    assert path.read_bytes() == intact[:-1]
+    assert path.read_bytes() == intact
+    backups = _backups(path)
+    assert len(backups) == 1
+    assert backups[0].read_bytes() == intact[:-1]
+    next_journal = AuditJournal(path)
+    next_journal.append({"event": "continued"})
+    assert next_journal.verify().last_sequence == 4
+
+
+def test_valid_but_hash_tampered_unterminated_record_fails_closed(tmp_path):
+    path, _ = _create(tmp_path)
+    rows = [json.loads(line) for line in path.read_text().splitlines()]
+    rows[-1]["event"] = "tampered"
+    damaged = ("\n".join(json.dumps(row) for row in rows)).encode()
+    path.write_bytes(damaged)
+    with pytest.raises(AuditIntegrityError, match="hash mismatch"):
+        AuditJournal(path, recover_truncated_tail=True).initialize()
+    assert path.read_bytes() == damaged
     assert not _backups(path)
 
 
@@ -203,3 +220,18 @@ def test_symlink_journal_remains_rejected(tmp_path):
         AuditJournal(link, recover_truncated_tail=True).initialize()
     assert real.read_bytes() == b'{"interrupted":'
     assert not _backups(link)
+
+
+def test_gateway_settings_opt_in_controls_recovery(tmp_path, monkeypatch):
+    from remote_mcp_commander.config import Settings
+    from remote_mcp_commander.gateway.app import configure_audit_for
+
+    path, intact = _create(tmp_path)
+    _damage(path)
+    monkeypatch.setenv("COMMANDER_AUDIT_RECOVER_TRUNCATED_TAIL", "true")
+    monkeypatch.setattr(audit_module, "_journal", None)
+    settings = Settings(audit_path=str(path))
+    assert settings.audit_recover_truncated_tail is True
+    journal = configure_audit_for(settings)
+    assert journal.verify().valid
+    assert path.read_bytes() == intact

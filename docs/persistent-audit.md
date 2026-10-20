@@ -51,11 +51,12 @@ matters, explicitly enable the narrow recovery policy:
 COMMANDER_AUDIT_RECOVER_TRUNCATED_TAIL=true
 ```
 
-If and only if the active `audit.jsonl` ends with **one malformed JSON record
-without a terminating newline**, and every preceding record (including all retained
-rotations) passes the regular hash-chain verification, startup may recover. The
-recovery is deliberately limited to a 64 KiB incomplete tail and requires at
-least one intact preceding record. An exclusive append lock is acquired before
+If the active `audit.jsonl` ends with an unterminated final JSONL line,
+and all prior records/retained rotations pass hash-chain verification, startup
+may recover. A **malformed** final JSON line can be quarantined and removed;
+a **complete, valid chained JSON record without its final newline** is kept
+unchanged and only its missing delimiter is restored. Both cases require
+a bounded 64 KiB final line and at least one intact verified record. An exclusive append lock is acquired before
 verification. A full byte-for-byte copy of the original active journal is
 fsynced to `audit.jsonl.recovery-<random>.backup` (mode `0600`) before the
 verified prefix replaces the current file via fsynced atomic rename. The
@@ -64,8 +65,8 @@ recovered Gateway logs a warning with the backup path and discarded byte count.
 **Never** automatically recover newline-terminated invalid JSON, corrupted
 hashes, sequence gaps, a damaged rotated file, or symlinks. Backups are excluded
 from normal rotation and must be retained for forensic review or archived
-separately. A truncated final event may be lost even though the intact chain
-continues. Because an attacker with audit-file write access can deliberately
+separately. A malformed truncated final event may be lost even though the intact chain
+continues; a valid complete event without a newline is preserved. Because an attacker with audit-file write access can deliberately
 damage a final line, recovery is off by default. Use remote immutable audit
 shipping where stronger guarantees are required.
 
